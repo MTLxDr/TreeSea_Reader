@@ -11,7 +11,7 @@
 如需校验下载文件，在 PowerShell 中运行以下命令，将结果与同一 Release 的 `.sha256` 文件比较。
 
 ```powershell
-Get-FileHash .\TreeSeaReader-ver1.0-recognition-20261103-win64.zip -Algorithm SHA256
+Get-FileHash .\TreeSeaReader-ver1.0-launchers-20261103-win64.zip -Algorithm SHA256
 ```
 
 ## 功能
@@ -36,6 +36,8 @@ Get-FileHash .\TreeSeaReader-ver1.0-recognition-20261103-win64.zip -Algorithm SH
 - [`WORKLOG.md`](WORKLOG.md) · 版本修改记录。
 
 公开源码仓库包含代码和依赖清单。完整运行、便携版构建及部分回归测试还依赖资料数据库、素材和测试图片。直接使用程序时请下载便携包。
+
+源码环境安装完成后，可双击 `启动树海Reader.cmd`。计算器和效果库从主界面顶部打开。脚本和 Agent 可直接调用 `launch_reader.py` 或便携版的 `TreeSeaReaderCLI.exe`。
 
 ```powershell
 py -3.13 -m venv .venv

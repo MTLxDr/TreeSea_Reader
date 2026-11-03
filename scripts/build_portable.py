@@ -18,7 +18,7 @@ import time
 from urllib.request import Request,urlopen
 from zipfile import ZipFile,ZIP_DEFLATED
 
-from build_launchers import batch_files,compile_launchers,release_version
+from build_launchers import compile_launchers,release_version
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -126,7 +126,7 @@ def main():
         source.backup(dest)
         if dest.execute('pragma integrity_check').fetchone()[0]!='ok':raise ValueError('Packaged database failed integrity check')
     for name in ['sources','effects','exploration']:copy_tree(ROOT/'data'/name,data/name)
-    batch_files(output);compile_launchers(output)
+    compile_launchers(output)
     usage=(ROOT/'packaging/portable_usage.txt').read_text(encoding='utf-8')
     (output/'使用说明.txt').write_text(usage,encoding='utf-8-sig')
     manifest={'version':release_version()['VERSION'],'display_version':release_version()['DISPLAY_VERSION'],'built_at':datetime.now(timezone.utc).isoformat(),'platform':'Windows x64','entry':'TreeSeaReader.exe','cli':'TreeSeaReaderCLI.exe',

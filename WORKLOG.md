@@ -78,3 +78,4 @@
 
 2026-11-03（识别更新暂停）：源码修改和41张PRTS插画已留在工作区。四张真实清单验收见 reports/recognition_upgrade/validation.json，藏品12/12与5/5、干员8/8及8个等级、零件10/10（9种）、8张估价、7张可移动次数、箱内总估价56。五层旧截图回放确认同层节点保留和三次到达记录；事件仅用插画合成画面验收，实际事件页面待测。已有176项回归在末尾UI调整前通过，4项新回归和便携27项在末尾调整前通过，便携启动器自检通过。最终针对性回归按用户要求暂停，便携目录为中间版本，正式识别更新ZIP未生成。恢复时先运行 `PYTHONPATH=tests` 下的 `test_recognition_upgrade test_inventory test_live_exploration test_revision_r6 test_gui test_window_presentation test_tab_modes`，再用 `scripts/finalize_portable.py` 同步最终源码与打包，归档名 `dist/TreeSeaReader-ver1.0-recognition-20261103-win64.zip`，使用同目录验收JSON作为输入，旧ver 1.0归档保留。使用说明见 docs/recognition_upgrade_20261103.md。
 2026-11-03（恢复识别更新）：最终源码针对性回归 41 项通过，覆盖地图连续识别、事件、居民、清单、窗口显示与 TAB。发布仍使用 ver 1.0，以日期区分识别更新归档。
+2026-11-03（启动入口精简）：源码目录仅保留 `启动树海Reader.cmd`，便携目录仅提供主程序与命令行 EXE。旧快捷入口从构建脚本移除，更新现有便携目录时清除六个旧 CMD。清理了测试临时目录、源码字节码缓存、重复的根目录 EXE 与可重下的嵌入式 Python ZIP。源码 CMD 实际启动、3 项入口回归和便携目录 6 项启动验证通过。

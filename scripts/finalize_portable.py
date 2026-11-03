@@ -45,6 +45,8 @@ def main():
     parser.add_argument('--sync-only',action='store_true',help='Prepare the portable folder before running its acceptance checks')
     args=parser.parse_args()
     folder=args.root.resolve();archive_path=args.archive.resolve();folder.relative_to(ROOT);archive_path.relative_to(ROOT)
+    if folder == ROOT:
+        raise ValueError('Use a separate portable directory')
     if archive_path.exists():raise FileExistsError(archive_path)
     manifest_path=folder/'portable_manifest.json'
     manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -59,6 +61,8 @@ def main():
     shutil.copy2(ROOT/'data/effects/catalog.json',folder/'data/effects/catalog.json')
     spec=importlib.util.spec_from_file_location('release_launchers',ROOT/'scripts/build_launchers.py')
     launchers=importlib.util.module_from_spec(spec);spec.loader.exec_module(launchers)
+    for name in launchers.LEGACY_BATCH_FILES:
+        (folder/name).unlink(missing_ok=True)
     launchers.compile_launchers(folder)
     version=launchers.release_version()
     manifest.update(version=version['VERSION'],display_version=version['DISPLAY_VERSION'])

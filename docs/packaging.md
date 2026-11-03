@@ -6,11 +6,11 @@
 
 ## 日常使用
 
-- 原项目目录：双击 `TreeSeaReader.exe`，使用原项目环境与已有本局数据。
+- 原项目目录：双击 `启动树海Reader.cmd`，使用原项目环境与已有本局数据。
 - 便携版：完整解压 `dist/TreeSeaReader-ver1.0-win64.zip` 后，双击文件夹中的 `TreeSeaReader.exe`。它使用随包运行环境，不需要另装Python、Qt或OCR模型。
 - 主界面保留地图、节点概率和库存/干员页，顶部可打开效果库与独立数值计算；计算窗口包含本局规则接入、逐步算式、来源说明、JSON导出和本机接口启停。
 
-四个原中文CMD仍可使用，统一转到相同启动器：主程序、计算器、效果库、数值接口。需要把整个便携文件夹放在一起，单独复制EXE无法包含数据库和OCR运行环境。目标为Windows x64，EXE启动器使用Windows的.NET Framework 4.x。
+便携目录提供主界面 `TreeSeaReader.exe` 和命令行 `TreeSeaReaderCLI.exe` 两个入口。请完整解压整个文件夹。目标为 Windows x64，启动器使用 Windows 的 .NET Framework 4.x。
 
 便携目录与原项目数据分开：原项目的本局存档、截图、日志和设置没有打进发布包。便携版首次启动生成自己的 `data/sessions` 等文件；可通过本局导入功能继续使用已有JSON存档。
 
@@ -52,7 +52,7 @@ Reader、从 Reader 打开的效果库和计算器均使用普通窗口，持续
 
 旧主入口实际复现了 `ENCODING is not recognized`，并错误提示项目环境不存在，导致没有创建窗口。原启动文件为LF换行，且各入口错误处理不一致。
 
-现在所有CMD统一为ASCII内容、Windows CRLF换行；路径完整引用，参数继续转发。统一Python入口为 `launch_reader.py`，包含所有工具的启动诊断和报错。EXE入口可处理中文、空格路径，命令行版保留UTF-8标准输入输出。
+源码目录的启动 CMD 直接调用项目虚拟环境和 `launch_reader.py`，使用 ASCII 与 Windows CRLF 换行，并转发参数。EXE 入口支持中文和空格路径，命令行保留 UTF-8 标准输入输出。
 
 GUI按程序所在目录定位资源；CLI保留调用者的工作目录，输入/输出相对路径按调用目录解析，避免外部程序从其他目录调用时找错文件。
 
@@ -75,7 +75,7 @@ GUI按程序所在目录定位资源；CLI保留调用者的工作目录，输�
 源码构建：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\build_launchers.py
+.\.venv\Scripts\python.exe scripts\build_launchers.py --output "dist\launcher-build"
 .\.venv\Scripts\python.exe scripts\build_portable.py --output "dist\新便携版"
 ```
 
@@ -83,7 +83,7 @@ GUI按程序所在目录定位资源；CLI保留调用者的工作目录，输�
 
 已有输出目录不会被构建器覆盖。发布包保留依赖元数据、许可证、公开来源原文及数据库快照，`portable_manifest.json` 记录运行环境版本和文件哈希。打包不会重写原数据库或用户会话。
 
-`scripts/validate_launchers.py` 从其他工作目录实际调用CMD和EXE，检查Windows原生窗口可见性、中文JSON输入、带中文和空格的文件名、API健康/计算/正常退出。便携版另做真实地图OCR。完整结果在 `reports/packaging/`，其余数值和识别边界仍以对应功能文档为准。
+`scripts/validate_launchers.py` 从其他工作目录实际调用EXE，检查Windows原生窗口可见性、中文JSON输入、带中文和空格的文件名、API健康/计算/正常退出。便携版另做真实地图OCR。完整结果在 `reports/packaging/`，其余数值和识别边界仍以对应功能文档为准。
 
 运行环境依据：[Python官方Windows嵌入式发行版说明](https://docs.python.org/3.13/using/windows.html#the-embeddable-package)。
 ## 2026-10-30 本局计算更新（r3）

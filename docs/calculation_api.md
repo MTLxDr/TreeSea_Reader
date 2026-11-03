@@ -6,7 +6,7 @@
 
 当前默认页为“本局伤害计算”：读取清单、选择干员/技能，固定0防0抗输出 DPH 与技能期间平均 DPS。新增 `operation: session_dps`，支持原 Python/CLI/HTTP 通道及完整导出，时序模型与基础伤害算法分开标记。操作、公式与时序范围见 [本局DPH与DPS](session_dps.md)。旧手工页、按敌人计算及接口服务入口移到“高级计算”，旧接口保持兼容。
 
-双击项目根目录的“启动数值计算器.cmd”，或在 Reader 顶部点击“独立数值计算”。窗口支持属性乘区录入、JSON输入、逐步计算、导出请求与结果、导出Schema；可启动和停止本机HTTP接口。
+在 Reader 顶部点击“独立数值计算”。窗口支持属性乘区录入、JSON输入、逐步计算、导出请求与结果、导出Schema；可启动和停止本机HTTP接口。
 
 “效果库”是单独窗口，可查询原文、生效条件线索、叠加上限、来源运算标注、分档与未编译状态。原文收录不能当作规则已可自动执行。
 
@@ -81,7 +81,7 @@ assert result["hp_damage"] == 700
 
 ## 本机HTTP
 
-运行“启动数值接口.cmd”，或：
+在便携版目录运行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m reader.calculation_api --serve --port 8765

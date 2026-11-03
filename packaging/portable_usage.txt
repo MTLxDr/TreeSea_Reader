@@ -13,7 +13,7 @@
 关卡时机相对波次片段/条件分支，路线显示源移动点连线。184条含条件变体，72个池来自dlc1快照。未自动翻页，消耗后不再出现的物品需人工移除/修正。详见docs/live_exploration.md。
 
 主界面顶部可打开“效果库”和“独立数值计算”。计算器默认本局页：读取清单→选择干员/技能并核对练度→计算DPH/DPS；固定0防0抗，显示单段命中伤害、技能期间平均DPS、攻速/间隔/时长/次数及算式。支持导出给其他程序；手工计算、按敌人计算和接口服务入口位于“高级计算”。具体公式和支持范围见 docs/session_dps.md。
-四个中文 CMD 保留为快捷入口。TreeSeaReaderCLI.exe 是命令行入口，例如：
+TreeSeaReaderCLI.exe 用于命令行与外部程序集成，例如：
   TreeSeaReaderCLI.exe --tool api --port 8765
   TreeSeaReaderCLI.exe --tool calculate --input request.json --output result.json
   TreeSeaReaderCLI.exe --self-check --with-ocr --report diagnostic.json

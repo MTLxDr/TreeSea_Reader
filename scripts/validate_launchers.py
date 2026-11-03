@@ -1,4 +1,4 @@
-"""Exercise real CMD/EXE GUI launches, Unicode CLI and the loopback API."""
+"""Exercise native GUI launches, Unicode CLI and the loopback API."""
 import argparse
 import ctypes
 from ctypes import wintypes
@@ -25,25 +25,28 @@ def wait_json(path,timeout=40):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--root',type=Path,default=ROOT)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--label',default='source');parser.add_argument('--ocr-image',type=Path);args=parser.parse_args()
     app_root=args.root.resolve();stamp=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
     folder=ROOT/'reports/packaging'/('startup-'+args.label+'-'+stamp);folder.mkdir(parents=True)
     foreign=folder/'foreign cwd';foreign.mkdir()
     report={'root':str(app_root),'checked_at':datetime.now(timezone.utc).isoformat(),'cases':[]}
     visible=ctypes.windll.user32.IsWindowVisible;visible.argtypes=[wintypes.HWND];visible.restype=wintypes.BOOL
-    for name,tool in [('启动树海Reader.cmd','reader'),('启动数值计算器.cmd','calculator'),('启动效果库.cmd','effects')]:
+    gui=app_root/'TreeSeaReader.exe'
+    for tool in ('reader','calculator','effects'):
         marker=folder/(tool+'.json')
-        command=['cmd.exe','/d','/c','call',str(app_root/name),'--quit-after-ms','3000','--launch-report',str(marker)]
+        command=[str(gui),'--tool',tool,'--quit-after-ms','3000','--launch-report',str(marker)]
         if tool=='reader':command+=['--no-hotkeys','--session',str(folder/'isolated_session.json')]
         if tool=='calculator':command+=['--review-example']
         # Detached GUI children may inherit stdout pipe handles. Capturing the
         # pipe would wait until the GUI closes, too late to inspect visibility.
-        result=subprocess.run(command,cwd=foreign,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15,creationflags=NO_WINDOW)
-        if result.returncode:raise AssertionError(('CMD launcher failed',name,result.returncode))
-        state=wait_json(marker)
-        native_visible=bool(visible(wintypes.HWND(state['window_id'])))
-        if not state['visible'] or state['minimized'] or not native_visible:raise AssertionError((tool,state,native_visible))
+        process=subprocess.Popen(command,cwd=foreign,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=NO_WINDOW)
+        try:
+            state=wait_json(marker)
+            native_visible=bool(visible(wintypes.HWND(state['window_id'])))
+            if not state['visible'] or state['minimized'] or not native_visible:raise AssertionError((tool,state,native_visible))
+        finally:
+            if process.wait(timeout=15):raise AssertionError(('GUI launcher failed',tool,process.returncode))
         report['cases'].append({'name':tool,'window_created':True,'native_visible':native_visible,'title':state['title'],'pid':state['pid']})
     cli=app_root/'TreeSeaReaderCLI.exe'
     data={'attacker':{'atk':{'base':{'value':1000,'source':{'kind':'manual','name':'中文 启动测试'}}}},'defender':{'def':{'base':300}}}
@@ -57,7 +60,7 @@ def main():
     if run.returncode or json.loads(output_file.read_text(encoding='utf-8'))['hp_damage']!=700:raise AssertionError('Native CLI quoted path failure')
     report['cases'].append({'name':'native_cli_unicode_file_paths','passed':True})
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-    api=subprocess.Popen(['cmd.exe','/d','/c','call',str(app_root/'启动数值接口.cmd'),'--port',str(port),'--quit-after-ms','5000'],cwd=foreign,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=NO_WINDOW)
+    api=subprocess.Popen([str(cli),'--tool','api','--port',str(port),'--quit-after-ms','5000'],cwd=foreign,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=NO_WINDOW)
     base=f'http://127.0.0.1:{port}';health=None
     end=time.monotonic()+12
     while time.monotonic()<end and api.poll() is None:
@@ -72,7 +75,7 @@ def main():
     if result['hp_damage']!=700:raise AssertionError('API calculation failure')
     stdout,stderr=api.communicate(timeout=10)
     if api.returncode:raise AssertionError(stderr.decode('utf-8','replace'))
-    report['cases'].append({'name':'api_cmd_health_calculation_and_clean_exit','health':health,'passed':True})
+    report['cases'].append({'name':'api_cli_health_calculation_and_clean_exit','health':health,'passed':True})
     if args.ocr_image:
         target=folder/'ocr_result.json'
         run=subprocess.run([str(cli),'--tool','recognize',str(args.ocr_image.resolve()),'--output',str(target)],capture_output=True,cwd=foreign,timeout=90,creationflags=NO_WINDOW)
