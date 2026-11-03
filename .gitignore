@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+data/captures/
+data/sessions/
+data/logs/
+data/settings.json
+.test-tmp/
+build/
+dist/
+TreeSeaReader.exe
+TreeSeaReaderCLI.exe

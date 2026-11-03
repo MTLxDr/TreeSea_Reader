@@ -1,0 +1,1509 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TreeSea Reader calculation request",
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": [
+        "kind",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "base",
+            "skill",
+            "talent",
+            "relic",
+            "part",
+            "map",
+            "buff",
+            "enemy",
+            "module",
+            "potential",
+            "trust",
+            "level",
+            "manual",
+            "unknown"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "id": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "maxLength": 4000
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "revision": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "maxLength": 4000
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      }
+    },
+    "attribute": {
+      "type": "object",
+      "required": [
+        "base"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "object",
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "source": {
+                  "$ref": "#/$defs/source"
+                }
+              }
+            }
+          ]
+        },
+        "minimum": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maximum": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "base_add": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "direct_add": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "direct_mul_delta": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "final_add": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "final_factors": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "relic_add": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "relic_mul_delta": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "relic_post_factors": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "stage_add": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "stage_factors": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "final_groups": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/multiplier_group"
+          }
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "atk": {
+          "$ref": "#/$defs/attribute"
+        },
+        "attack_speed": {
+          "$ref": "#/$defs/attribute"
+        },
+        "def": {
+          "$ref": "#/$defs/attribute"
+        },
+        "element_res": {
+          "$ref": "#/$defs/attribute"
+        },
+        "ep_resistance": {
+          "$ref": "#/$defs/attribute"
+        },
+        "max_hp": {
+          "$ref": "#/$defs/attribute"
+        },
+        "res": {
+          "$ref": "#/$defs/attribute"
+        }
+      }
+    },
+    "multiplier_group": {
+      "type": "object",
+      "required": [
+        "group_id",
+        "deltas"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+        },
+        "deltas": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "stacking": {
+          "enum": [
+            "add",
+            "max",
+            "min",
+            "multiply"
+          ],
+          "default": "multiply"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "attacker"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "enum": [
+            "1.0",
+            "1.1",
+            "1.2"
+          ]
+        },
+        "operation": {
+          "const": "damage"
+        },
+        "attacker": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "atk": {
+              "$ref": "#/$defs/attribute"
+            },
+            "attack_speed": {
+              "$ref": "#/$defs/attribute"
+            },
+            "def": {
+              "$ref": "#/$defs/attribute"
+            },
+            "element_res": {
+              "$ref": "#/$defs/attribute"
+            },
+            "ep_resistance": {
+              "$ref": "#/$defs/attribute"
+            },
+            "max_hp": {
+              "$ref": "#/$defs/attribute"
+            },
+            "res": {
+              "$ref": "#/$defs/attribute"
+            }
+          },
+          "required": [
+            "atk"
+          ]
+        },
+        "defender": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "atk": {
+              "$ref": "#/$defs/attribute"
+            },
+            "attack_speed": {
+              "$ref": "#/$defs/attribute"
+            },
+            "def": {
+              "$ref": "#/$defs/attribute"
+            },
+            "element_res": {
+              "$ref": "#/$defs/attribute"
+            },
+            "ep_resistance": {
+              "$ref": "#/$defs/attribute"
+            },
+            "max_hp": {
+              "$ref": "#/$defs/attribute"
+            },
+            "res": {
+              "$ref": "#/$defs/attribute"
+            }
+          }
+        },
+        "hit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "res_penetration_ratio": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "attack_scale": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "min_damage_ratio": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "def_penetration_ratio": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "def_penetration_flat": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "res_penetration_flat": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "shield": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "attack_flat_add": {
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            },
+            "type": {
+              "enum": [
+                "physical",
+                "arts",
+                "true",
+                "element"
+              ]
+            },
+            "hits": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "barrier_charges": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "immune": {
+              "type": "boolean"
+            },
+            "post_scale_factors": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "value"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "source": {
+                        "$ref": "#/$defs/source"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "post_scale_groups": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/multiplier_group"
+              }
+            },
+            "attack_scale_groups": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/multiplier_group"
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "element"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "def_penetration_flat": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 0
+                          },
+                          "source": {
+                            "$ref": "#/$defs/source"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "def_penetration_ratio": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 0
+                          },
+                          "source": {
+                            "$ref": "#/$defs/source"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "res_penetration_flat": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 0
+                          },
+                          "source": {
+                            "$ref": "#/$defs/source"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "res_penetration_ratio": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "value"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "value": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 0
+                          },
+                          "source": {
+                            "$ref": "#/$defs/source"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "timing": {
+          "type": "object",
+          "required": [
+            "base_interval"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "base_interval": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "value"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "source": {
+                      "$ref": "#/$defs/source"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "context": {}
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "operation",
+        "attribute"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "enum": [
+            "1.0",
+            "1.1",
+            "1.2"
+          ]
+        },
+        "operation": {
+          "const": "attribute"
+        },
+        "stat": {
+          "type": "string"
+        },
+        "attribute": {
+          "$ref": "#/$defs/attribute"
+        },
+        "context": {}
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "operation",
+        "amount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "enum": [
+            "1.0",
+            "1.1",
+            "1.2"
+          ]
+        },
+        "operation": {
+          "const": "elemental_buildup"
+        },
+        "amount": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "object",
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "source": {
+                  "$ref": "#/$defs/source"
+                }
+              }
+            }
+          ]
+        },
+        "defender": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ep_resistance": {
+              "$ref": "#/$defs/attribute"
+            }
+          }
+        },
+        "min_damage_ratio": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "object",
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "source": {
+                  "$ref": "#/$defs/source"
+                }
+              }
+            }
+          ]
+        },
+        "post_scale_groups": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/multiplier_group"
+          }
+        },
+        "post_scale_factors": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "$ref": "#/$defs/source"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "hits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "context": {}
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "operation",
+        "session",
+        "selection"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.2"
+        },
+        "operation": {
+          "const": "session_damage"
+        },
+        "session": {
+          "type": "object"
+        },
+        "allow_partial": {
+          "type": "boolean",
+          "default": false
+        },
+        "context": {},
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operator_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "stage_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "enemy_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "enemy_level": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "difficulty": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            "squad_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "skill_active": {
+              "type": "boolean"
+            },
+            "damage_type": {
+              "enum": [
+                "physical",
+                "arts",
+                "true",
+                "element"
+              ]
+            },
+            "attack_mode": {
+              "enum": [
+                "melee",
+                "ranged"
+              ]
+            },
+            "target_mode": {
+              "enum": [
+                "enemy",
+                "zero"
+              ],
+              "default": "enemy"
+            },
+            "hits": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "effect_ids": {
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "operator_panel": {
+              "type": "object",
+              "required": [
+                "stats",
+                "included"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "stats": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "atk": {
+                      "type": "number"
+                    },
+                    "def": {
+                      "type": "number"
+                    },
+                    "res": {
+                      "type": "number"
+                    },
+                    "max_hp": {
+                      "type": "number"
+                    },
+                    "attack_speed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "atk"
+                  ]
+                },
+                "included": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "trust",
+                      "potential",
+                      "module"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "operation",
+        "session",
+        "selection"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.2"
+        },
+        "operation": {
+          "const": "session_dps"
+        },
+        "session": {
+          "type": "object"
+        },
+        "allow_partial": {
+          "type": "boolean",
+          "default": false
+        },
+        "context": {},
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operator_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "stage_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "enemy_id": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "enemy_level": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "difficulty": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99
+            },
+            "squad_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "skill_active": {
+              "type": "boolean"
+            },
+            "damage_type": {
+              "enum": [
+                "physical",
+                "arts",
+                "true",
+                "element"
+              ]
+            },
+            "attack_mode": {
+              "enum": [
+                "melee",
+                "ranged"
+              ]
+            },
+            "target_mode": {
+              "const": "zero",
+              "default": "zero"
+            },
+            "hits": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "effect_ids": {
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "operator_panel": {
+              "type": "object",
+              "required": [
+                "stats",
+                "included"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "stats": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "atk": {
+                      "type": "number"
+                    },
+                    "def": {
+                      "type": "number"
+                    },
+                    "res": {
+                      "type": "number"
+                    },
+                    "max_hp": {
+                      "type": "number"
+                    },
+                    "attack_speed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "atk"
+                  ]
+                },
+                "included": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "trust",
+                      "potential",
+                      "module"
+                    ]
+                  }
+                }
+              }
+            },
+            "operator_fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "elite": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "level": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "mastery": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "module_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "module_level": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "potential": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "skill_1_mastery": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "skill_2_mastery": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "skill_3_mastery": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "skill_index": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "skill_level": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "trust": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "model": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 36000
+                },
+                "base_interval": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "interval_add": {
+                  "type": "number"
+                },
+                "interval_factor": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "first_hit": {
+                  "type": "number",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "hits_per_attack": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 32
+                },
+                "frame_align": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-algorithm-version": "0.3-prts",
+  "x-approval-status": "source_aligned",
+  "x-unit-notes": {
+    "ratio_delta": "+20% must be 0.2; direct/relic delta arrays are summed",
+    "factors": "Actual independent multipliers only; do not duplicate effects from named groups",
+    "groups": "PRTS final multipliers multiply by default; use add/max/min only with mechanic evidence. Explicit 1.0/1.1 requests preserve the old add default.",
+    "contributions": "Every numeric operand can carry {value,source:{kind,name,id,url,revision,detail}}; output formulas and source-labelled terms explain the calculation.",
+    "white_value_order": "PRTS: direct add -> direct multiplier -> final add -> final scaler; attack ratio is before mitigation and does not change white values",
+    "res": "Resistance in points; default RES cap 100. Ordinary RES reductions apply before cap; res_penetration_* means ignore RES after cap.",
+    "element": "element_res reduces elemental HP damage; ep_resistance reduces elemental_buildup. Neither channel supports penetration.",
+    "automatic_effects": "No source effect is automatically active merely because it is catalogued",
+    "session_damage": "Read-only confirmed session snapshot; inspect audit and status. Incomplete requests return result:null unless allow_partial is explicitly true.",
+    "session_dps": "Zero DEF/RES single target. DPH and finite skill-window average DPS are independently nullable; inspect audit, timing_missing and resolved_model. First-hit default 0s, theoretical intervals, end-exclusive window; not all skill timing is supported."
+  }
+}
