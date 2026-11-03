@@ -24,7 +24,7 @@ def map_signature(result):
 
 def reliable_node(node):
     return bool(node.get("manual") or node.get("evidence") in {"template_fixed_exit","template_fixed_node"} or
-                (node.get("evidence") == "ocr_label" and node.get("confidence", 0) >= .85))
+                (node.get("evidence") == "ocr_label" and node.get("confidence", 0) >= .75))
 
 
 class Session:
@@ -67,6 +67,7 @@ class Session:
         incoming = deepcopy(result)
         incoming.pop('_stable_observations',None)
         incoming.pop('_new_run_candidate',None)
+        incoming.pop('_continuity_nodes',None)
         if decision == 'new':
             self._push()
             self._clear_run('automatic_first_floor_start')
@@ -81,10 +82,10 @@ class Session:
                 self.exploration['entrance_floor']=old['floor']
                 self.exploration.pop('entrance_floor_manual',None)
                 self.exploration.pop('entrance_floor_before_manual',None)
-        elif incoming.get('current_slot') is not None and incoming.get('current_slot')!=old.get('current_slot'):
-            self.exploration['last_event']=None
         incoming["map_continuity"] = {"same_map": same_map,
             "method": "floor_template_slots_edges_start_terminals"}
+        if not same_map and incoming.get('position_evidence') == '人物标记':
+            incoming['last_confirmed_slot'] = deepcopy(incoming.get('current_slot'))
         if same_map:
             for name, value in old.get("fields", {}).items():
                 if value.get("manual"):
@@ -93,6 +94,7 @@ class Session:
                     if observed and observed.get('value') is not None:retained['manual_previous']=deepcopy(observed)
                     incoming.setdefault("fields", {})[name] = retained
             self._retain_nodes(old, incoming)
+            self._track_arrival(old, incoming)
             if old.get('position_manual'):
                 incoming.update(current_slot=deepcopy(old.get('current_slot')),position_manual=True,
                     position_before_manual=deepcopy(old.get('position_before_manual')),
@@ -115,6 +117,27 @@ class Session:
         self.merge_recent(incoming)
         self.persist()
         return True
+
+    def _track_arrival(self, old, incoming):
+        slot = incoming.get('current_slot')
+        previous = old.get('last_confirmed_slot')
+        if previous is None and old.get('position_evidence') == '人物标记':
+            previous = old.get('current_slot')
+        incoming['last_confirmed_slot'] = deepcopy(previous)
+        if slot is None or incoming.get('position_evidence') != '人物标记' or old.get('position_manual'):
+            return
+        incoming['last_confirmed_slot'] = deepcopy(slot)
+        if previous is None or slot == previous or incoming.get('at_start'):
+            return
+        node = next((n for n in incoming['nodes'] if n['slot'] == slot), {})
+        self.exploration['last_event'] = None
+        self._append_action(incoming, 'enter_node', slot=slot, from_slot=previous,
+                            node_type=node.get('type'))
+
+    def _append_action(self, observation, kind, **fields):
+        actions = self.exploration.setdefault('actions', [])
+        actions.append(dict(type=kind, run_id=self.run['id'], zone=self.exploration['zone_serial'],
+                            floor=observation.get('floor'), captured_at=observation.get('captured_at'), **fields))
 
     def _push(self):
         self.history.append(deepcopy({"snapshot_version": 2, "run": self.run, "map": self.current, "inventories": self.inventories,'exploration':self.exploration}))
@@ -230,6 +253,21 @@ class Session:
         kind = result["inventory_kind"]
         bucket = self.inventories[kind]
         self._push()
+        if kind == 'parts' and result.get('coverage'):
+            bucket['visible_cards'] = deepcopy(entries)
+            bucket.setdefault('page_fields', {}).update(deepcopy(result.get('page_fields', {})))
+            grouped = {}
+            for row in entries:
+                grouped.setdefault(row['id'], []).append(row)
+            entries = []
+            for copies in grouped.values():
+                entry = deepcopy(copies[0])
+                for key in ('valuation', 'uses'):
+                    observed = {c['fields'].get(key, {}).get('value') for c in copies}
+                    if len(observed) > 1:
+                        entry['fields'][key] = dict(value=None, source='different_visible_instances', confidence=0)
+                entry['visible_instances'] = len(copies)
+                entries.append(entry)
         by_id = {row["id"]: row for row in bucket["items"]}
         for entry in entries:
             old = by_id.get(entry["id"])
@@ -240,9 +278,10 @@ class Session:
                 if old.get("excluded"):
                     continue  # A manual removal must not be undone by a scan.
                 for key, value in old.get("fields", {}).items():
-                    if value.get("manual") or key not in incoming["fields"] or incoming["fields"][key].get("value") is None:
+                    observed = incoming['fields'].get(key, {})
+                    if value.get("manual") or (
+                            observed.get('value') is None and observed.get('source') != 'different_visible_instances'):
                         retained=deepcopy(value)
-                        observed=incoming['fields'].get(key)
                         if value.get('manual') and observed and observed.get('value') is not None and observed.get('confidence',0)>=.9:
                             retained['manual_previous']=deepcopy(observed)
                         incoming["fields"][key] = retained
@@ -291,7 +330,13 @@ class Session:
         self.exploration['events'].append({'id':identity,'name':event['event_name'],
             'occurrence_id':uuid4().hex,'run_id':self.run['id'],
             'zone':self.exploration['zone_serial'],'floor':(self.current or {}).get('floor'),
-            'repeatable':repeatable,'captured_at':event.get('captured_at'),'source':event.get('source')})
+            'repeatable':repeatable,'captured_at':event.get('captured_at'),'source':event.get('source'),
+            'evidence':deepcopy(event.get('event_evidence'))})
+        if not manual:
+            self._append_action(dict(event, floor=(self.current or {}).get('floor')), 'enter_event',
+                                event_id=identity, event_name=event['event_name'],
+                                evidence=event.get('event_evidence'),
+                                occurrence_id=self.exploration['events'][-1]['occurrence_id'])
         self.persist();return True
 
     def remove_event(self,occurrence_id):
@@ -299,6 +344,8 @@ class Session:
         if not any(e.get('occurrence_id')==occurrence_id for e in rows):return False
         self._push()
         self.exploration['events']=[e for e in rows if e.get('occurrence_id')!=occurrence_id]
+        if 'actions' in self.exploration:
+            self.exploration['actions']=[a for a in self.exploration['actions'] if a.get('occurrence_id')!=occurrence_id]
         # last_event intentionally remains: an unchanged event page must not undo deletion.
         self.persist();return True
 
@@ -394,11 +441,14 @@ class Session:
 
     def auto_inventory(self,result):
         if result.get('ownership_risk') or result.get('context_detected')!=result.get('inventory_kind'):return False
-        entries=[deepcopy(r) for r in result.get('entries',[]) if not r.get('needs_review') and r.get('confidence',0)>=.90]
+        threshold = .86 if result.get('coverage') else .90
+        entries=[deepcopy(r) for r in result.get('entries',[]) if not r.get('needs_review')
+                 and (r.get('confidence',0)>=threshold or (result.get('coverage') and r.get('corroborated')))]
         for entry in entries:
             entry['confirmed_by']='live_owned_page'
             entry['fields']={k:v for k,v in entry.get('fields',{}).items()
-                if v.get('value') is not None and v.get('confidence',0)>=.90}
+                if v.get('value') is not None and v.get('confidence',0) >=
+                (.78 if result.get('coverage') and v.get('source') == 'card_region_ocr' else .90)}
         bucket=self.inventories[result['inventory_kind']]
         if bucket.get('last_live_fingerprint')==result['page_fingerprint']:return False
         changed=self.merge_inventory(result,entries)

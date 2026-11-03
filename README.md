@@ -4,19 +4,19 @@
 
 ## 下载和启动
 
-1. 打开 [GitHub Releases](https://github.com/MTLxDr/TreeSea_Reader/releases)，下载最新版本的 `TreeSeaReader-ver1.0-win64.zip`。
+1. 打开 [GitHub Releases](https://github.com/MTLxDr/TreeSea_Reader/releases)，下载最新发布页中的 Windows x64 便携 ZIP。
 2. 在 Windows x64 上完整解压 ZIP，运行解压目录中的 `TreeSeaReader.exe`。便携包自带 Python 运行环境、识别模型和资料数据库。
 3. 在 Reader 顶栏选择游戏窗口，再开启「实时跟踪」。地图、藏品和干员清单需要在游戏中显示后才能读取，识别结果可手动校正。
 
 如需校验下载文件，在 PowerShell 中运行以下命令，将结果与同一 Release 的 `.sha256` 文件比较。
 
 ```powershell
-Get-FileHash .\TreeSeaReader-ver1.0-win64.zip -Algorithm SHA256
+Get-FileHash .\TreeSeaReader-ver1.0-recognition-20261103-win64.zip -Algorithm SHA256
 ```
 
 ## 功能
 
-- **探索记录** · 识别地图、资源、藏品、零件和干员，保留当前局记录，支持手动校正。
+- **探索记录** · 识别地图、资源、藏品、零件和干员，跟踪进入节点和已遇事件，支持手动校正。[识别更新说明](docs/recognition_upgrade_20261103.md)
 - **探索查询** · 查看节点概率、事件池、剩余藏品池和关卡路线。
 - **数值计算** · 查询效果资料，查看伤害计算的中间值。根据本局清单估算单次伤害和技能期间平均每秒伤害（DPS）。
 - **命令行与本地接口** · 使用 `TreeSeaReaderCLI.exe` 调用计算、识别和更新功能。详见 [启动与封装](docs/packaging.md)和[计算接口](docs/calculation_api.md)。

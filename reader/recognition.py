@@ -213,6 +213,8 @@ class Recognizer:
         self.ocr = ocr or TextReader()
         from .recent_relics import RecentRelicRecognizer
         self.recent_relics=RecentRelicRecognizer(self.catalog)
+        from .event_images import EventImages
+        self.event_images = EventImages()
         self.names = dict(NODE_NAMES)
         self.names['resident-occupant'] = '流窜居民'
         manifest = ROOT / "assets/nodes/manifest.json"
@@ -253,8 +255,13 @@ class Recognizer:
             if node['type']=='resident-occupant':
                 node.update(type='unobserved',label=self.names['unobserved'],resident=True,evidence='resident_caption')
             if icon is None:continue
-            x,y=map(round,node['pixel']);radius=round(spacing*.60)
-            patch=gray[max(0,y-radius):y+radius,max(0,x-radius):x+radius]
+            x,y=map(round,node['pixel'])
+            # Resident badges sit to the upper right of the node art.
+            x0=max(0,round(x-.03*spacing));x1=round(x+.64*spacing)
+            y0=max(0,round(y-.68*spacing));y1=round(y+.09*spacing)
+            patch=gray[y0:y1,x0:x1]
+            radius=round(.24*spacing)
+            centered=gray[max(0,y-radius):y+radius,max(0,x-radius):x+radius]
             best=0.
             for ratio in (.20,.27,.34,.41):
                 size=max(12,round(spacing*ratio));template=cv2.resize(icon,(size,size))
@@ -263,6 +270,9 @@ class Recognizer:
                 if template.std()<5:continue
                 score=cv2.matchTemplate(patch,template,cv2.TM_CCOEFF_NORMED).max()
                 best=max(best,float(score))
+                if min(centered.shape[:2],default=0)>=size:
+                    centered_score=float(cv2.matchTemplate(centered,template,cv2.TM_CCOEFF_NORMED).max())
+                    if centered_score>=.93:best=max(best,centered_score)
             if best>=.86 and node['type'] not in {'danger-end','danger-path','rogue-trader','secret-trader','fate-choice'}:
                 node.update(resident=True,resident_score=best)
         infer_position(region,explicit)
@@ -379,13 +389,18 @@ class Recognizer:
 
     def analyze(self, image, floor_hint=None, template_hint=None, source=None, side_mode="auto", side_template_hint=None, page_hint="auto"):
         from .inventory import InventoryRecognizer, KINDS
+        inventory_reader = InventoryRecognizer(self.catalog, self.ocr, self.recent_relics)
         if page_hint in KINDS:
-            return InventoryRecognizer(self.catalog, self.ocr).analyze(image, page_hint, source)
+            return inventory_reader.analyze(image, page_hint, source)
         started = time.perf_counter()
         height, width = image.shape[:2]
         scale = min(1.0, 1280 / width)
         working = cv2.resize(image, (round(width * scale), round(height * scale))) if scale < 1 else image.copy()
         tokens = self.ocr.read(working)
+        if page_hint == "auto":
+            from .inventory_layout import layout_kind
+            if layout := layout_kind(working, tokens):
+                return inventory_reader.analyze(image, kind=layout, source=source)
         fields = self.read_fields(working, tokens)
         floor = floor_hint if floor_hint is not None else fields.get("floor", {}).get("value")
         anchors = anchors_from_text(tokens, working.shape[1], working.shape[0], self.names)
@@ -516,13 +531,21 @@ class Recognizer:
             candidate["spacing"] /= scale
         if page_hint == "auto" and not is_map:
             from .exploration import ExplorationCatalog
-            event=ExplorationCatalog.shared().match_event(tokens)
-            if event:
-                result.update(page_type='event',event_id=event['id'],event_name=event['name'],needs_review=False)
-                return result
-            inventory = InventoryRecognizer(self.catalog, self.ocr).analyze(image, source=source)
+            inventory = inventory_reader.analyze(image, source=source, tokens=tokens)
+            if inventory is None and any(clean(t['text']) == '收起' for t in tokens):
+                inventory = inventory_reader.analyze(image, source=source)
             if inventory is not None:
                 return inventory
+            catalog = ExplorationCatalog.shared()
+            title = catalog.match_event(tokens)
+            preview = any('出发前往' in t['text'] for t in tokens)
+            event = self.event_images.match(working, catalog.event_names, title) if not preview else None
+            if event is None and title and not preview and len(anchors) < 2:
+                event = dict(title, method='title')
+            if event and not event.get('conflict'):
+                result.update(page_type='event',event_id=event['id'],event_name=event['name'],
+                              event_evidence=event,needs_review=False)
+                return result
         return result
 
     def _side_result(self, image, anchors, rows, scale, hint):

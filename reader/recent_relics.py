@@ -36,6 +36,32 @@ class RecentRelicRecognizer:
                 variants.append((sample[:,:,:3].copy(),mask,grey,size))
             self.templates.append((rows[asset['id']],asset,variants))
 
+    def match_patch(self, patch):
+        if self.templates is None:self.load()
+        if not self.templates or min(patch.shape[:2]) < 80:return None
+        patch_grey=cv2.cvtColor(patch,cv2.COLOR_BGR2GRAY);coarse=[]
+        for index,(_,_,variants) in enumerate(self.templates):
+            score=-1.
+            for colour,mask,template,size in variants:
+                if size not in (64,72):continue
+                response=cv2.matchTemplate(patch_grey,template,cv2.TM_CCOEFF_NORMED)
+                score=max(score,float(cv2.minMaxLoc(response)[1]))
+            coarse.append((score,index))
+        ranked=[]
+        for coarse_score,index in sorted(coarse,reverse=True)[:12]:
+            item,asset,variants=self.templates[index];best=-1.
+            for template,mask,_,size in variants:
+                if template.shape[0]>patch.shape[0] or template.shape[1]>patch.shape[1]:continue
+                response=cv2.matchTemplate(patch,template,cv2.TM_CCOEFF_NORMED,mask=mask)
+                response[~np.isfinite(response)]=-1
+                best=max(best,float(cv2.minMaxLoc(response)[1]))
+            ranked.append((best,coarse_score,item,asset))
+        ranked.sort(key=lambda r:-r[0]);score,coarse_score,item,asset=ranked[0]
+        if score<.66:return None
+        margin=score-ranked[1][0] if len(ranked)>1 else 1.
+        accepted=score>=.80 and coarse_score>=.70 and margin>=.08
+        return item,asset,ranked,score,margin,accepted
+
     def analyze(self,image):
         height,width=image.shape[:2]
         if height<300 or width<500:return []
@@ -55,27 +81,9 @@ class RecentRelicRecognizer:
             left,top=max(0,round(cx)-43),max(0,round(cy)-46)
             patch=strip[top:min(100,top+90),left:min(strip.shape[1],left+86)]
             if min(patch.shape[:2])<80:continue
-            patch_grey=cv2.cvtColor(patch,cv2.COLOR_BGR2GRAY);coarse=[]
-            for index,(_,_,variants) in enumerate(self.templates):
-                score=-1.
-                for colour,mask,template,size in variants:
-                    if size not in (64,72):continue
-                    response=cv2.matchTemplate(patch_grey,template,cv2.TM_CCOEFF_NORMED)
-                    score=max(score,float(cv2.minMaxLoc(response)[1]))
-                coarse.append((score,index))
-            ranked=[]
-            for coarse_score,index in sorted(coarse,reverse=True)[:12]:
-                item,asset,variants=self.templates[index];best=-1.
-                for template,mask,_,size in variants:
-                    if template.shape[0]>patch.shape[0] or template.shape[1]>patch.shape[1]:continue
-                    response=cv2.matchTemplate(patch,template,cv2.TM_CCOEFF_NORMED,mask=mask)
-                    response[~np.isfinite(response)]=-1
-                    best=max(best,float(cv2.minMaxLoc(response)[1]))
-                ranked.append((best,coarse_score,item,asset))
-            ranked.sort(key=lambda r:-r[0]);score,coarse_score,item,asset=ranked[0]
-            if score<.66:continue
-            margin=score-ranked[1][0] if len(ranked)>1 else 1.
-            accepted=score>=.80 and coarse_score>=.70 and margin>=.08
+            match=self.match_patch(patch)
+            if match is None:continue
+            item,asset,ranked,score,margin,accepted=match
             entry=dict(deepcopy(item),kind='relics',fields={'quantity':{'value':None,'source':'recent_icon','confidence':0.,'manual':False}},
                 raw='近期获得图标',match_score=round(score,4),match_margin=round(margin,4),confidence=round(score,4),
                 needs_review=not accepted,icon_source=asset['source_url'],page_fingerprint=fingerprint,

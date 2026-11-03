@@ -103,8 +103,30 @@ def nearby_fields(index, observations, tokens, width, height, kind):
 
 
 class InventoryRecognizer:
-    def __init__(self, catalog, ocr):
+    def __init__(self, catalog, ocr, relic_icons=None):
         self.catalog, self.ocr = catalog, ocr
+        self.relic_icons = relic_icons
+
+    def relic_card_icon(self, image, box):
+        if self.relic_icons is None:
+            return None
+        from .inventory_layout import crop
+
+        x, y, _, _ = box
+        patch = crop(image, (max(0, x-.086), max(0, y-.014), x-.004, y+.112))
+        if not patch.size:
+            return None
+        patch = cv2.resize(patch, (105, 110), interpolation=cv2.INTER_AREA)
+        match = self.relic_icons.match_patch(patch)
+        if match is None:
+            return None
+        item, asset, _, score, margin, accepted = match
+        if not accepted or score < .86 or margin < .10:
+            return None
+        h, w = image.shape[:2]
+        a, b, c, d = box
+        return dict(text=item['name'], score=score, icon_source=asset['source_url'],
+                    box=[[a*w,b*h],[c*w,b*h],[c*w,d*h],[a*w,d*h]])
 
     def analyze(self, image, kind=None, source=None, tokens=None):
         started = time.perf_counter()
@@ -115,42 +137,100 @@ class InventoryRecognizer:
             tokens = self.ocr.read(working)
             for token in tokens:
                 token["box"] = (np.asarray(token["box"]) / scale).tolist()
-        detected = page_kind(tokens, height)
+        from .inventory_layout import boxes_for, detail_fields, layout_kind, line_token
+
+        layout = layout_kind(image, tokens)
+        detected = layout or page_kind(tokens, height)
         kind = kind or detected
         if kind not in KINDS:
             return None
         observations = []
         catalog = self.catalog.inventory[kind]
-        for token in tokens:
+        card_count = 0
+        unresolved = []
+        candidates = [(token, {}, None) for token in tokens]
+        if layout == kind:
+            candidates = []
+            for box, details in boxes_for(image, kind, tokens):
+                card_count += 1
+                x0, y0, x1, y1 = box
+                inside = [t for t in tokens if x0-.006 <= center(t)[0]/width <= x1+.006
+                          and y0-.004 <= center(t)[1]/height <= y1+.004
+                          and name_candidates(t["text"], catalog)]
+                strong = any(t["score"] >= .90 and name_candidates(t["text"], catalog)[0][0] == 1 for t in inside)
+                local = line_token(self.ocr, image, box) if kind != "parts" or not strong else None
+                if kind == "operators" and inside and not strong:
+                    anchor = max(inside, key=lambda t: t["score"])
+                    a, b, c, d = rect(anchor)
+                    tight = (max(x0,(a-4)/width),max(y0,(b-4)/height),min(x1,(c+4)/width),min(y1,(d+4)/height))
+                    focused = line_token(self.ocr, image, tight)
+                    if focused and normalized(focused["text"]) == normalized(anchor["text"]):
+                        local = focused
+                options = inside + ([local] if local else [])
+                exact = [t for t in options if any(s == 1 for s, _ in name_candidates(t["text"], catalog))]
+                if kind == "relics" and not any(t["score"] >= .90 for t in exact):
+                    icon = self.relic_card_icon(image, box)
+                    if icon:
+                        if not exact or any(normalized(t["text"]) == normalized(icon["text"]) for t in exact):
+                            options.append(icon)
+                            exact.append(icon)
+                if options:
+                    token = max(exact or options, key=lambda t: t["score"])
+                    if local in exact and local["score"] >= .68 and any(
+                            normalized(t["text"]) == normalized(local["text"]) and t["score"] >= .68 for t in inside):
+                        token = dict(token, corroborated=True)
+                    candidates.append((token, details, box))
+                else:
+                    unresolved.append(box)
+        for token, details, card in candidates:
             if token["score"] < .68:
                 continue
             choices = name_candidates(token["text"], catalog)
             if not choices:
+                if card is not None:
+                    unresolved.append(card)
                 continue
             similarity, item = choices[0]
             gap = similarity - choices[1][0] if len(choices) > 1 else 1.
             observations.append({"token": token, "item": item, "similarity": similarity,
+                                 "details": details, "card": card,
                                  "candidates": [{"id": i["id"], "name": i["name"], "score": s} for s, i in choices],
-                                 "ambiguous": gap < .08 or similarity < 1. or token["score"] < .90})
+                                 "ambiguous": gap < .08 or similarity < 1. or (
+                                     token["score"] < (.90 if card is None else .86) and not token.get("corroborated"))})
         entries = []
         repeated = Counter(o["item"]["id"] for o in observations)
         for index, observed in enumerate(observations):
             item, token = observed["item"], observed["token"]
+            values = (detail_fields(self.ocr, image, observed["details"], tokens) if layout == kind
+                      else nearby_fields(index, observations, tokens, width, height, kind))
             entries.append({"id": item["id"], "name": item["name"], "kind": kind,
                 "confidence": token["score"] * observed["similarity"], "raw": token["text"],
+                "corroborated": bool(token.get("corroborated")),
+                "icon_source": token.get("icon_source"),
                 "box": token["box"], "candidates": observed["candidates"],
-                "needs_review": observed["ambiguous"] or repeated[item["id"]] > 1,
+                "needs_review": observed["ambiguous"] or (layout != kind and repeated[item["id"]] > 1),
                 "document_id": item["document_id"], "source_url": item["source_url"],
-                "fields": nearby_fields(index, observations, tokens, width, height, kind)})
+                "fields": values})
+        page_fields = {}
+        if layout == "parts":
+            total = detail_fields(self.ocr, image, {"valuation": (.132, .735, .197, .792)}).get("valuation")
+            if total:
+                page_fields["total_valuation"] = total
         # OCR layout/text fingerprint catches identical/overlapping screenshots;
         # it is evidence for repeated observations, never an inventory increment.
         signature = "|".join(sorted(f"{normalized(t['text'])}:{round(center(t)[0]/width*100)}:{round(center(t)[1]/height*100)}" for t in tokens))
-        risk = any(re.search(r"(?:购买|售价|招募寻访|招募费用|商品列表)", t["text"]) for t in tokens)
+        risk = layout != kind and any(re.search(r"(?:购买|售价|招募寻访|招募费用|商品列表)", t["text"]) for t in tokens)
+        coverage = {"visible": card_count, "recognized": sum(not r["needs_review"] for r in entries),
+                    "unresolved": unresolved} if layout == kind else None
+        if layout == kind:
+            signature += repr(([(r["id"], {k: v["value"] for k, v in r["fields"].items()}) for r in entries],
+                               {k: v["value"] for k, v in page_fields.items()}))
         return {"schema_version": 2, "page_type": "inventory", "inventory_kind": kind,
             "captured_at": datetime.now(timezone.utc).isoformat(), "source": source,
             "image": {"width": width, "height": height}, "entries": entries, "ocr_tokens": tokens,
             "page_fingerprint": hashlib.sha256(signature.encode()).hexdigest(),
             "context_detected": detected, "ownership_risk": risk, "needs_review": True,
+            "coverage": coverage, "page_fields": page_fields,
             "notices": ["翻页继续读取；可在表格中补录练度、数量或修正名称。"] +
                 (["当前为购买或招募页面，请切到持有清单。"] if risk else []),
             "elapsed_seconds": time.perf_counter() - started}

@@ -68,7 +68,9 @@ class EventListPanel(QWidget):
         self.refresh_options();rows=self.session.exploration['events'];self.table.setRowCount(len(rows))
         for i,event in enumerate(rows):
             info=self.catalog.event_info(event['id']);manual=(event.get('source') or {}).get('method')=='manual'
-            values=[event['name'],event.get('floor') or '未读取',floor_label(info),'手动' if manual else '截图']
+            method = (event.get('evidence') or {}).get('method')
+            label = {'image':'插画','image_and_title':'插画与标题','title':'标题'}.get(method,'截图')
+            values=[event['name'],event.get('floor') or '未读取',floor_label(info),'手动' if manual else label]
             for j,value in enumerate(values):
                 cell=QTableWidgetItem(str(value));cell.setData(Qt.ItemDataRole.UserRole,event.get('occurrence_id'))
                 self.table.setItem(i,j,cell)

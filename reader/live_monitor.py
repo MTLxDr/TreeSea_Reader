@@ -17,8 +17,9 @@ from .run_tracking import frame_observation
 def observation_key(result):
     page = result.get('page_type')
     if page == 'map' and not result.get('needs_review') and result.get('template_id') and result.get('nodes'):
+        nodes = result.get('_continuity_nodes', result['nodes'])
         values = [page, result.get('floor'), result.get('template_id'), result.get('current_slot'),
-            sorted((n['slot'], n['type'], bool(n.get('resident'))) for n in result.get('nodes', [])),
+            sorted((n['slot'], n['type'], bool(n.get('resident')), n.get('observation_conflict')) for n in nodes),
             sorted((k, v.get('value')) for k, v in result.get('fields', {}).items()),
             sorted(r['id'] for r in result.get('recent_relics',[]) if not r.get('needs_review')),
             result.get('side_map', {}).get('template_id'),
@@ -27,6 +28,7 @@ def observation_key(result):
         values = [page, result['inventory_kind'], sorted((r['id'], sorted((k, v.get('value'))
             for k, v in r['fields'].items())) for r in result['entries'] if not r.get('needs_review'))]
         if not values[2]:return None
+        values.append(sorted((k,v.get('value')) for k,v in result.get('page_fields',{}).items()))
     elif page == 'event':
         values = [page, result.get('event_id')]
     else:return None

@@ -14,11 +14,12 @@ from .operator_ui import OperatorDetailsDialog
 FIELDS = {"quantity": ("数量", 1, 999), "level": ("等级", 1, 90), "elite": ("精英阶段", 0, 2),
           "potential": ("潜能", 1, 6), "skill_level": ("技能等级", 1, 7), "mastery": ("专精", 0, 3)}
 FIELDS["skill_index"] = ("技能编号（用于专精）", 1, 3)
+FIELDS.update(valuation=("当前估价",0,99999),uses=("可用次数",0,99))
 FIELDS.update(trust=("信赖",0,200),module_level=("模组等级",0,3),
               skill_1_mastery=("技能1专精",0,3),skill_2_mastery=("技能2专精",0,3),skill_3_mastery=("技能3专精",0,3))
-COLUMNS = {"relics": ["名称", "数量"], "parts": ["名称", "数量"],
+COLUMNS = {"relics": ["名称", "数量"], "parts": ["名称", "数量", "当前估价", "可用次数"],
            "operators": ["名称", "等级", "精英阶段", "技能等级", "专精"]}
-KEYS = {"relics": ["quantity"], "parts": ["quantity"],
+KEYS = {"relics": ["quantity"], "parts": ["quantity", "valuation", "uses"],
         "operators": ["level", "elite", "skill_level", "mastery"]}
 
 
@@ -208,6 +209,10 @@ class InventoryPanel(QWidget):
         rows = [r for r in bucket["items"] if not r.get("excluded")]
         self.status.setText(f"{KINDS[kind]}　已记录 {len(rows)} 种 / {len(bucket['pages'])} 页　·　"
                             + ("已录全" if bucket["complete"] else "可继续翻页同步"))
+        if kind == "parts":
+            total = bucket.get("page_fields", {}).get("total_valuation", {}).get("value")
+            if total is not None:
+                self.status.setText(self.status.text() + f"　箱内总估价 {total}")
         check = self.completes[kind]
         check.blockSignals(True)
         check.setChecked(bucket["complete"])
@@ -237,13 +242,27 @@ class InventoryPanel(QWidget):
         self.selected_name.setText(row["name"])
         fields = "　".join(f"{FIELDS[key][0]} {data['value']}" for key, data in row.get("fields", {}).items()
                            if key in FIELDS and data.get("value") is not None)
+        if self.kind == "parts":
+            copies = [card for card in self.session.inventories["parts"].get("visible_cards", [])
+                      if card["id"] == identity]
+            if len(copies) > 1:
+                lines = []
+                for index, card in enumerate(copies, 1):
+                    details = "，".join(f"{FIELDS[key][0]} {card['fields'][key]['value']}"
+                                        for key in ("valuation", "uses") if key in card["fields"])
+                    lines.append(f"本页第 {index} 张：{details or '字段待读取'}")
+                fields = "\n".join(lines)
         self.selected_hint.setText(fields or "字段未知，可补录。")
 
     # -- 扫描结果 --------------------------------------------------------
     def set_scan(self, result, follow=True):
         self.scan = result
         if follow:self.show_kind(result["inventory_kind"])
-        self.help.setText("\n".join(result["notices"]))
+        coverage = result.get("coverage")
+        if coverage:
+            self.help.setText(f"本页识别 {coverage['recognized']} / {coverage['visible']} 张卡。其余卡片可补录。")
+        else:
+            self.help.setText("\n".join(result["notices"]))
         self._rebuild_candidates()
 
     def _rebuild_candidates(self):
@@ -371,7 +390,7 @@ class InventoryPanel(QWidget):
             names.setCurrentIndex(names.findData(chosen))
         form.addRow("名称（可搜索）", names)
         spins = {}
-        keys = list(FIELDS)[1:] if kind == "operators" else ["quantity"]
+        keys = [key for key in FIELDS if key not in {"quantity", "valuation", "uses"}] if kind == "operators" else KEYS[kind]
         for key in keys:
             label, lo, hi = FIELDS[key]
             spin = QSpinBox()

@@ -194,10 +194,11 @@ class MapView(QGraphicsView):
                 if not mark.isNull():
                     mark=mark.scaled(round(radius*1.5),round(radius*1.5),Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
                     item=self.scene.addPixmap(mark);item.setPos(center[0]+radius*.45,center[1]-radius*1.8);item.setToolTip('流窜居民')
-            if not self.screenshot:
+            if not self.screenshot or node.get('settlement_candidate'):
                 badges=[]
-                if node.get('settlement_candidate'):badges.append('据点候选')
-                badges.extend(('秘境' if r['name']=='秘境行商' else '奇境')+f" {r['probability']:.0%}" for r in node.get('high_value',[]))
+                if node.get('settlement_candidate'):badges.append('居民据点候选')
+                if not self.screenshot:
+                    badges.extend(('秘境' if r['name']=='秘境行商' else '奇境')+f" {r['probability']:.0%}" for r in node.get('high_value',[]))
                 if badges:
                     badge=self.scene.addText(' / '.join(badges));badge.setDefaultTextColor(QColor('#e9cf81'))
                     badge.setPos(center[0]-badge.boundingRect().width()/2,center[1]+radius+22);visuals.append(badge)
@@ -868,6 +869,7 @@ class ReaderWindow(QMainWindow):
     def live_ready(self,result,image):
         # This path never changes focus, visibility or the user's current tab.
         if self.busy:return
+        result.pop('_continuity_nodes', None)
         self.last_scan=result;self.image=image;page=result.get('page_type');changed=False
         if page=='map':
             changed=self.session.apply(result)
@@ -877,7 +879,8 @@ class ReaderWindow(QMainWindow):
                 self.result=deepcopy(self.session.current);self.map_image=image
         elif page=='inventory':
             changed=self.session.auto_inventory(result);self.inventory_panel.set_scan(result,follow=False)
-            self.inventory_panel.help.setText('可见清单已同步；翻页后继续读取。下表可补录或修正。' if changed else '本页条目待确认；勾选后合并本页。')
+            if not result.get('coverage'):
+                self.inventory_panel.help.setText('可见清单已同步，翻页后继续读取。' if changed else '勾选后合并本页。')
             if changed and getattr(self,'calculation_window',None):self.calculation_window.dps_panel.refresh_snapshot()
         elif page=='event':changed=self.session.record_event(result)
         if changed:self.status.setText(self.session.transition_message if page=='map' and self.session.transition_message else {'map':'地图已更新','inventory':'本局清单已同步','event':'已遇事件已记录'}[page])
@@ -894,10 +897,19 @@ class ReaderWindow(QMainWindow):
                 result['needs_review']=False;result['template_confirmation_inherited']=True
                 from .resident_tracking import infer_position,update_resident_constraints
                 infer_position(result,result.get('current_slot'));update_resident_constraints(result)
+        if result.get('page_type')=='map' and not result.get('needs_review') and previous:
+            signature = map_signature(result)
+            if signature is not None and signature == map_signature(previous):
+                projection = {'nodes': deepcopy(result['nodes'])}
+                self.session._retain_nodes(previous, projection)
+                result['_continuity_nodes'] = projection['nodes']
         return result
 
     def live_preview(self,result,image):
         if self.busy:return
+        if self.session.current and result.get('floor') in {None, self.session.current.get('floor')}:
+            self.last_scan=result
+            return
         self.result=result;self.image=image;self.map_image=image;self.last_scan=result;self.render()
 
     def correct_position(self):
@@ -1017,17 +1029,26 @@ class ReaderWindow(QMainWindow):
             if self.preview_path:
                 QTimer.singleShot(150, self.save_preview)
             return
-        self.map_image = image
+        result = self.live_context(result)
+        result.pop('_continuity_nodes', None)
         committed = self.session.apply(result)
         if committed:
+            self.map_image = image
             self.map_committed()
             self.recognizer.refresh_probabilities(self.session.current)
             self.session.persist()
-        self.result = deepcopy(self.session.current) if committed or (self.session.transition_message and self.session.current) else result
+        current = self.session.current
+        preserve = bool(current and not committed and (
+            result["page_type"] != "map" or result.get("floor") in {None, current.get("floor")}
+            or self.session.transition_message))
+        if not committed and not preserve and result["page_type"] == "map":
+            self.map_image = image
+        self.result = deepcopy(current) if committed or preserve else result
         if self.result.get("nodes") and self.selected_slot is None:
             node = next((n for n in self.result["nodes"] if n.get("probabilities")), self.result["nodes"][0])
             self.selected_slot = node["slot"]
         self.status.setText("地图已更新" if committed else
+                            "沿用上次确认的地图" if preserve else
                             "请选择并确认地图构型" if result["page_type"] == "map" else "等待地图、清单或事件页面")
         if committed and self.result.get("needs_node_review"):
             self.status.setText("连续识别的节点类型存在冲突，已暂停概率计算。请点击对应节点手动确认。")
@@ -1066,7 +1087,7 @@ class ReaderWindow(QMainWindow):
         result = self.result
         self.map_view.show_map(result)
         self.side_view.show_map((result or {}).get("side_map"))
-        is_map_scan = (self.last_scan or {}).get("page_type") == "map"
+        is_map_scan = (self.last_scan or {}).get("page_type") == "map" and self.image is self.map_image
         self.screenshot_view.show_map(result if is_map_scan else None, self.image, self.overlay.isChecked())
         self.inventory_panel.refresh()
         self.event_pool.refresh()
@@ -1100,7 +1121,15 @@ class ReaderWindow(QMainWindow):
         elif self.tabs.currentWidget()==self.probability_panel:
             self.summary.setText("节点概率 · 路标经验频率与本层数量约束")
         position=(result or {}).get('current_slot');residents=(result or {}).get('resident_constraints',{})
-        self.notes.setText(f"当前位置：{tuple(position) if position is not None else '待定位'}　居民：{len(residents.get('visible',[]))}　据点候选：{len(residents.get('settlement_candidates',[]))}\n滚轮缩放，拖动平移，点击节点可修正或设为当前位置。")
+        action_text = ""
+        actions = self.session.exploration.get('actions', [])
+        if actions and actions[-1]['zone'] == self.session.exploration['zone_serial']:
+            latest = actions[-1]
+            if latest['type'] == 'enter_event':
+                action_text = f"\n最近行动：进入事件「{latest['event_name']}」"
+            elif latest['type'] == 'enter_node':
+                action_text = f"\n最近行动：进入节点 {tuple(latest['slot'])}"
+        self.notes.setText(f"当前位置：{tuple(position) if position is not None else '待定位'}　居民：{len(residents.get('visible',[]))}　据点候选：{len(residents.get('settlement_candidates',[]))}{action_text}\n滚轮缩放，拖动平移，点击节点可修正或设为当前位置。")
         self.notes.setToolTip('\n'.join((result or {}).get('notices',[])))
         if self.selected_slot and result:
             region = result if self.selected_region == "main" else side
