@@ -215,6 +215,10 @@ class Recognizer:
         self.recent_relics=RecentRelicRecognizer(self.catalog)
         from .event_images import EventImages
         self.event_images = EventImages()
+        from .resident_vision import ResidentVision
+        self.resident_vision = ResidentVision()
+        from .inventory import InventoryRecognizer
+        self.inventory_reader = InventoryRecognizer(self.catalog, self.ocr, self.recent_relics)
         self.names = dict(NODE_NAMES)
         self.names['resident-occupant'] = '流窜居民'
         manifest = ROOT / "assets/nodes/manifest.json"
@@ -248,33 +252,14 @@ class Recognizer:
                     if .25*spacing<h<.7*spacing and .04*spacing<w<.28*spacing and h/w>1.9 and area>.008*spacing**2 and -.45<dx<.18 and abs(dy)<.3:
                         figures.append(node['slot']);break
             if len(figures)==1:explicit=figures[0]
-        asset=ROOT/'assets/nodes/mark-1.png'
-        icon=cv2.imdecode(np.fromfile(asset,dtype=np.uint8),cv2.IMREAD_UNCHANGED) if asset.exists() else None
-        gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        from .resident_vision import attach_residents
         for node in region['nodes']:
             if node['type']=='resident-occupant':
                 node.update(type='unobserved',label=self.names['unobserved'],resident=True,evidence='resident_caption')
-            if icon is None:continue
-            x,y=map(round,node['pixel'])
-            # Resident badges sit to the upper right of the node art.
-            x0=max(0,round(x-.03*spacing));x1=round(x+.64*spacing)
-            y0=max(0,round(y-.68*spacing));y1=round(y+.09*spacing)
-            patch=gray[y0:y1,x0:x1]
-            radius=round(.24*spacing)
-            centered=gray[max(0,y-radius):y+radius,max(0,x-radius):x+radius]
-            best=0.
-            for ratio in (.20,.27,.34,.41):
-                size=max(12,round(spacing*ratio));template=cv2.resize(icon,(size,size))
-                if min(patch.shape[:2],default=0)<size:continue
-                template=cv2.cvtColor(template[:,:,:3],cv2.COLOR_BGR2GRAY)
-                if template.std()<5:continue
-                score=cv2.matchTemplate(patch,template,cv2.TM_CCOEFF_NORMED).max()
-                best=max(best,float(score))
-                if min(centered.shape[:2],default=0)>=size:
-                    centered_score=float(cv2.matchTemplate(centered,template,cv2.TM_CCOEFF_NORMED).max())
-                    if centered_score>=.93:best=max(best,centered_score)
-            if best>=.86 and node['type'] not in {'danger-end','danger-path','rogue-trader','secret-trader','fate-choice'}:
-                node.update(resident=True,resident_score=best)
+        markers = region.get('resident_markers')
+        if markers is None:
+            markers = self.resident_vision.detect(image)
+        attach_residents(region, markers)
         infer_position(region,explicit)
         update_resident_constraints(region)
 
@@ -284,6 +269,31 @@ class Recognizer:
     def refresh_probabilities(self,result):
         from .probability import refresh_map_probabilities
         refresh_map_probabilities(result,self.catalog)
+
+    def recover_label(self,image,x,y,spacing):
+        """Read the caption below one projected node after local contrast correction."""
+        h,w=image.shape[:2]
+        a,b=max(0,round(x-spacing*.48)),max(0,round(y+spacing*.08))
+        c,d=min(w,round(x+spacing*.48)),min(h,round(y+spacing*.49))
+        patch=image[b:d,a:c]
+        if min(patch.shape[:2],default=0)<8:
+            return None
+        gray=cv2.cvtColor(patch,cv2.COLOR_BGR2GRAY)
+        bright=(gray>145).astype(np.uint8)
+        if bright.sum()<spacing*.25:
+            return None
+        _,_,stats,centers=cv2.connectedComponentsWithStats(bright)
+        glyphs=[center for stat,center in zip(stats[1:],centers[1:])
+                if spacing*.05<stat[3]<spacing*.23 and stat[2]<spacing*.25 and stat[4]>4]
+        if len(glyphs)<2 or max(p[0] for p in glyphs)-min(p[0] for p in glyphs)<spacing*.20:
+            return None
+        enhanced=cv2.createCLAHE(clipLimit=2.,tileGridSize=(4,4)).apply(gray)
+        enlarged=cv2.resize(enhanced,None,fx=2,fy=2,interpolation=cv2.INTER_CUBIC)
+        for token in self.ocr.read(enlarged):
+            kind,similarity=label_type(token['text'],self.names)
+            if kind and kind!='resident-occupant' and similarity>=.88 and token['score']>=.80:
+                return kind,token['score']*similarity
+        return None
 
     def read_fields(self, image, tokens):
         height, width = image.shape[:2]
@@ -389,21 +399,46 @@ class Recognizer:
 
     def analyze(self, image, floor_hint=None, template_hint=None, source=None, side_mode="auto", side_template_hint=None, page_hint="auto"):
         from .inventory import InventoryRecognizer, KINDS
-        inventory_reader = InventoryRecognizer(self.catalog, self.ocr, self.recent_relics)
+        inventory_reader = self.inventory_reader
         if page_hint in KINDS:
             return inventory_reader.analyze(image, page_hint, source)
         started = time.perf_counter()
         height, width = image.shape[:2]
+        if page_hint=='auto':
+            from .inventory_layout import layout_kind
+            image_layout=layout_kind(image,[])
+            if image_layout in {'relics','operators'}:
+                result=inventory_reader.analyze(image,kind=image_layout,source=source,tokens=[])
+                result['elapsed_seconds']=time.perf_counter()-started
+                return result
         scale = min(1.0, 1280 / width)
         working = cv2.resize(image, (round(width * scale), round(height * scale))) if scale < 1 else image.copy()
         tokens = self.ocr.read(working)
         if page_hint == "auto":
             from .inventory_layout import layout_kind
             if layout := layout_kind(working, tokens):
-                return inventory_reader.analyze(image, kind=layout, source=source)
-        fields = self.read_fields(working, tokens)
+                original_tokens = [dict(t, box=(np.asarray(t['box'])/scale).tolist()) for t in tokens]
+                result = inventory_reader.analyze(image, kind=layout, source=source,tokens=original_tokens)
+                result['elapsed_seconds'] = time.perf_counter()-started
+                return result
+        resident_markers = self.resident_vision.detect(working)
+        # Symbol-only OCR fragments from a badge must not become grid anchors.
+        map_tokens = []
+        for token in tokens:
+            x0,y0,x1,y1=bounds(token)
+            center=np.array([(x0+x1)/2,(y0+y1)/2])
+            if not any(np.linalg.norm(center-np.asarray(m['center'])) < m['size']*.52 for m in resident_markers):
+                map_tokens.append(token)
+        fields = self.read_fields(working, map_tokens)
         floor = floor_hint if floor_hint is not None else fields.get("floor", {}).get("value")
-        anchors = anchors_from_text(tokens, working.shape[1], working.shape[0], self.names)
+        anchors = anchors_from_text(map_tokens, working.shape[1], working.shape[0], self.names)
+        if len(anchors)<4 and 'action_points' in fields and floor is not None:
+            gray=cv2.cvtColor(working,cv2.COLOR_BGR2GRAY)
+            enhanced=cv2.createCLAHE(clipLimit=2.,tileGridSize=(8,8)).apply(gray)
+            recovered=self.ocr.read(enhanced)
+            recovered_anchors=anchors_from_text(recovered,working.shape[1],working.shape[0],self.names)
+            if len(recovered_anchors)>len(anchors):
+                anchors=recovered_anchors
         templates = self.catalog.templates
         marker_count=0
         if floor==6 and len(anchors)<4 and anchors and 'action_points' in fields:
@@ -473,6 +508,7 @@ class Recognizer:
             result["notices"].append("未分离出右侧小图不代表小图不存在；画面有小图时可指定“存在”后重读。")
         if region_ambiguous:
             result["notices"].append("主图与小图的分区存在近似候选，请核对后指定小图状态重读。")
+        result['resident_markers'] = [dict(m,center=[v/scale for v in m['center']],size=m['size']/scale) for m in resident_markers]
         if is_map:
             chosen = candidates[0]
             template = next(t for t in templates if t["template_id"] == chosen["template_id"])
@@ -497,6 +533,11 @@ class Recognizer:
                     marker_confidence = self._small_marker(working, x, y, chosen["spacing"])
                     if marker_confidence:
                         kind, confidence, evidence = "empty", marker_confidence, "small_marker_candidate"
+                    else:
+                        recovered=self.recover_label(working,x,y,chosen['spacing'])
+                        if recovered:
+                            kind,confidence=recovered
+                            evidence='ocr_label'
                 distance = graph_distances.get(tuple(slot))
                 result["nodes"].append({"region_id": "main", "slot": slot, "pixel": [x / scale, y / scale], "type": kind,
                                         "label": self.names.get(kind, kind), "confidence": confidence,
@@ -510,7 +551,8 @@ class Recognizer:
             region={'nodes':[dict(n,pixel=[v*scale for v in n['pixel']]) for n in result['nodes']],
                 'grid':{'origin':chosen['origin'],'spacing':chosen['spacing']},'start_slot':result['start_slot'],
                 'needs_review':result['needs_review'],'edges':result['edges']}
-            self.locate_overlays(working,tokens,region)
+            region['resident_markers'] = resident_markers
+            self.locate_overlays(working,map_tokens,region)
             for old,new in zip(result['nodes'],region['nodes']):old.update({k:v for k,v in new.items() if k!='pixel'})
             for key in ('current_slot','position_evidence','at_start','resident_constraints'):result[key]=region.get(key)
             result["notices"].append("连通结构来自候选模板；匹配分数不是概率。起点来自模板，不等同于当前人物位置。")

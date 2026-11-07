@@ -120,8 +120,15 @@ class MapView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        from .map_annotations import MapAnnotations
+        self.annotations=MapAnnotations(self)
+        self._map_key=None
 
     def show_map(self, result, image=None, overlay=True):
+        key=(result or {}).get('run_id'),(result or {}).get('floor'),(result or {}).get('template_id')
+        preserve_view=key==self._map_key and result is not None
+        self._map_key=key
+        self.annotations.set_result(result)
         self.node_visuals = {}
         self.scene.clear()
         if self.screenshot and image is not None:
@@ -139,7 +146,9 @@ class MapView(QGraphicsView):
             self.draw_region(result.get("side_map", {}))
         else:
             self.scene.setSceneRect(self.scene.itemsBoundingRect().adjusted(-30, -30, 30, 30))
-        self.fit()
+        if not preserve_view:
+            self.fit()
+        self.annotations.redraw()
 
     def draw_region(self, result):
         nodes = result.get("nodes", [])
@@ -268,6 +277,8 @@ class ReaderWindow(QMainWindow):
         self.recognizer.catalog.use_observed_ranges=self.ui_options.get("use_observed_ranges",True)
         self.recognizer.catalog.fourth_floor_memory=self.ui_options.get("fourth_floor_memory",False)
         self.build_ui()
+        for view in (self.map_view,self.side_view,self.screenshot_view):
+            view.annotations.bind(self.session)
         self.probability_panel.model_changed.connect(self.probability_changed)
         self.live_monitor=LiveMonitor(self.recognizer,self.tasks,guard=lambda:self.busy,
             hints=lambda:{'floor_hint':self.floor_hint.currentData(),'side_mode':self.side_mode.currentData()},
@@ -1249,7 +1260,7 @@ class ReaderWindow(QMainWindow):
             self.inventory_panel.set_scan({'page_type':'inventory','inventory_kind':'relics','entries':recent,
                 'captured_at':self.session.current.get('captured_at'),'page_fingerprint':recent[0]['page_fingerprint'],
                 'source':self.session.current.get('source'),'ownership_risk':False,'context_detected':'recent_relics',
-                'notices':['底部近期获得记录：明确匹配已补入清单，其他图标可在本页确认；数量在清单表中补齐。']},follow=False)
+                'notices':['底部近期获得记录：明确匹配已补入清单，其他图标可在本页确认。打开藏品页可读取叠层。']},follow=False)
         if getattr(self,'calculation_window',None):self.calculation_window.dps_panel.refresh_snapshot()
 
     def reset_map_hints(self):
@@ -1306,6 +1317,11 @@ class ReaderWindow(QMainWindow):
             self.recognizer.catalog.include_exploration_items()
             self.recognizer.recent_relics.templates=None
             self.recognizer.recent_relics.cache.clear()
+            from .inventory import InventoryRecognizer
+            from .relic_state import rules as relic_rules
+            relic_rules.cache_clear()
+            self.recognizer.inventory_reader=InventoryRecognizer(self.recognizer.catalog,self.recognizer.ocr,
+                                                                 self.recognizer.recent_relics)
             if self.session.current:
                 self.recognizer.refresh_probabilities(self.session.current)
                 self.result=deepcopy(self.session.current);self.session.persist()

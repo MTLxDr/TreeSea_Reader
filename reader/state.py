@@ -113,8 +113,58 @@ class Session:
         if incoming.get('at_start') and not self.exploration['initial_residents']:
             self.exploration['initial_residents']=[n['slot'] for n in incoming['nodes'] if n.get('resident')]
         update_resident_constraints(incoming,self.exploration['initial_residents'])
+        self._track_residents(incoming,same_map)
         self.current = incoming
         self.merge_recent(incoming)
+        self.persist()
+        return True
+
+    def _track_residents(self,incoming,same_map):
+        from .resident_tracking import graph_distances
+        positions=sorted([n['slot'] for n in incoming['nodes'] if n.get('resident')])
+        frames=self.exploration.setdefault('resident_frames',[])
+        previous=frames[-1] if same_map and frames and frames[-1]['zone']==self.exploration['zone_serial'] else None
+        if previous and previous['positions']==positions:
+            return
+        if previous and positions and len(previous['positions'])==len(positions):
+            choices=[]
+            for source in previous['positions']:
+                distances=graph_distances(incoming,source)
+                choices.append([index for index,p in enumerate(positions) if distances.get(tuple(p),99)<=1])
+            solutions=[]
+            def match(index,used,pairs):
+                if len(solutions)>1:
+                    return
+                if index==len(choices):
+                    solutions.append(list(pairs))
+                    return
+                for target in choices[index]:
+                    if target not in used:
+                        match(index+1,used|{target},pairs+[target])
+            match(0,set(),[])
+            if len(solutions)==1:
+                for source,index in zip(previous['positions'],solutions[0]):
+                    if source!=positions[index]:
+                        self.exploration.setdefault('resident_routes',[]).append(
+                            dict(zone=self.exploration['zone_serial'],**{'from':source,'to':positions[index]}))
+        frames.append(dict(zone=self.exploration['zone_serial'],positions=positions,captured_at=incoming.get('captured_at')))
+        self.exploration['resident_frames']=frames[-200:]
+
+    def set_annotations(self,key,strokes):
+        old=self.exploration.setdefault('annotations',{}).get(key,[])
+        if old==strokes:
+            return
+        undo=self.exploration.setdefault('annotation_undo',{}).setdefault(key,[])
+        undo.append(deepcopy(old))
+        del undo[:-20]
+        self.exploration['annotations'][key]=deepcopy(strokes)
+        self.persist()
+
+    def undo_annotation(self,key):
+        history=self.exploration.get('annotation_undo',{}).get(key,[])
+        if not history:
+            return False
+        self.exploration.setdefault('annotations',{})[key]=history.pop()
         self.persist()
         return True
 
@@ -253,6 +303,14 @@ class Session:
         kind = result["inventory_kind"]
         bucket = self.inventories[kind]
         self._push()
+        page_key=result.get('page_layout_fingerprint',result['page_fingerprint'])
+        if kind=='relics':
+            if bucket.get('complete'):
+                bucket['round_ids']=[]
+            seen=bucket.setdefault('round_ids',[])
+            for entry in entries:
+                if entry['id'] not in seen:
+                    seen.append(entry['id'])
         if kind == 'parts' and result.get('coverage'):
             bucket['visible_cards'] = deepcopy(entries)
             bucket.setdefault('page_fields', {}).update(deepcopy(result.get('page_fields', {})))
@@ -272,12 +330,21 @@ class Session:
         for entry in entries:
             old = by_id.get(entry["id"])
             incoming = deepcopy(entry)
+            if kind=='relics':
+                from .relic_state import merge
+                incoming=merge(old,incoming,result['page_fingerprint'])
+                if incoming is None:
+                    continue
             incoming["confirmed"] = True
+            incoming['page_order']=bucket['pages'].index(page_key) if page_key in bucket['pages'] else len(bucket['pages'])
             incoming["last_seen"] = result["captured_at"]
             if old:
-                if old.get("excluded"):
+                if old.get("excluded") and kind!='relics':
                     continue  # A manual removal must not be undone by a scan.
                 for key, value in old.get("fields", {}).items():
+                    if (kind=='relics' and key in {'stacks','used'}
+                            and old.get('relic_state',{}).get('generation') != incoming.get('relic_state',{}).get('generation')):
+                        continue
                     observed = incoming['fields'].get(key, {})
                     if value.get("manual") or (
                             observed.get('value') is None and observed.get('source') != 'different_visible_instances'):
@@ -292,8 +359,9 @@ class Session:
             else:
                 bucket["items"].append(incoming)
                 by_id[incoming["id"]] = incoming
-        if result["page_fingerprint"] not in bucket["pages"]:
-            bucket["pages"].append(result["page_fingerprint"])
+        if page_key not in bucket["pages"]:
+            bucket["pages"].append(page_key)
+        bucket['last_page_fingerprint']=result['page_fingerprint']
         bucket["complete"] = False
         self.persist()
         return True
@@ -305,16 +373,91 @@ class Session:
         if existing is None:
             existing = dict(deepcopy(item), fields={}, manual=True, confirmed=True)
             bucket["items"].append(existing)
+        was_excluded=existing.get('excluded')
+        if kind=='relics':
+            from .relic_state import initialize,merge,rule_for
+            if was_excluded and not excluded:
+                previous=deepcopy(existing)
+                previous['exclusion_reason']='lost'
+                existing.update(merge(previous,deepcopy(existing),'manual_restore:'+uuid4().hex))
+            initialize(existing)['held']=not excluded
         existing["excluded"] = excluded
+        if kind=='relics' and excluded:
+            existing['exclusion_reason']='manual'
+        if kind=='relics' and not excluded:
+            seen=bucket.setdefault('round_ids',[])
+            if item['id'] not in seen:
+                seen.append(item['id'])
         for key, value in (fields or {}).items():
             previous=deepcopy(existing.get('fields',{}).get(key))
             if previous and previous.get('manual'):previous=previous.get('manual_previous')
             existing.setdefault("fields", {})[key] = {"manual_previous":previous,"value": value, "manual": True, "source": "manual", "confidence": 1.}
+            if kind=='relics' and key=='stacks' and value is not None and rule_for(item['id']).get('one_use'):
+                state=initialize(existing)
+                state['trigger_offset']=value-len(state.get('triggered_generations',[]))
+                state['trigger_count']=value
         bucket["complete"] = False
         self.persist()
 
+    def lose_relic(self, identity):
+        row=next((r for r in self.inventories['relics']['items'] if r['id']==identity),None)
+        if row is None:
+            return False
+        self._push()
+        from .relic_state import lose
+        bucket=self.inventories['relics']
+        lose(row,'lost',bucket.get('last_live_fingerprint') or bucket.get('last_page_fingerprint'))
+        row['relic_state']['lost_recent_page']=self.inventories['relics'].get('last_recent_fingerprint')
+        self.persist()
+        return True
+
+    def reacquire_relic(self, identity):
+        row=next((r for r in self.inventories['relics']['items'] if r['id']==identity),None)
+        if row is None or not row.get('excluded'):
+            return False
+        self._push()
+        from .relic_state import merge
+        row['exclusion_reason']='lost'
+        incoming=deepcopy(row)
+        incoming['fields']={k:v for k,v in incoming['fields'].items() if k not in {'stacks','used'}}
+        row.update(merge(row,incoming,'manual_reacquisition:'+uuid4().hex))
+        seen=self.inventories['relics'].setdefault('round_ids',[])
+        if identity not in seen:
+            seen.append(identity)
+        self.persist()
+        return True
+
+    def record_relic_trigger(self, identity):
+        row=next((r for r in self.inventories['relics']['items'] if r['id']==identity),None)
+        if row is None:
+            return False
+        from .relic_state import initialize,rule_for
+        if not rule_for(identity).get('one_use'):
+            return False
+        state=initialize(row)
+        if state['generation'] in state.get('triggered_generations',[]):
+            return False
+        self._push()
+        from .relic_state import merge
+        entry=deepcopy(row)
+        entry['fields']['used']=dict(value=True,source='manual',confidence=1.,manual=True)
+        row.update(merge(row,entry,'manual_trigger'))
+        self.persist()
+        return True
+
     def complete_inventory(self, kind, complete):
         self._push()
+        if kind=='relics':
+            bucket=self.inventories[kind]
+            if complete and bucket.get('round_ids'):
+                from .relic_state import lose
+                for row in bucket['items']:
+                    if not row.get('excluded') and row['id'] not in bucket['round_ids']:
+                        lose(row,'lost',bucket.get('last_live_fingerprint') or bucket.get('last_page_fingerprint'))
+                        row['relic_state']['lost_recent_page']=bucket.get('last_recent_fingerprint')
+            elif not complete:
+                bucket['round_ids']=[]
+                bucket.pop('last_live_fingerprint',None)
         self.inventories[kind]["complete"] = bool(complete)
         self.persist()
 
@@ -432,10 +575,24 @@ class Session:
         for entry in result.get('recent_relics',[]):
             if entry.get('needs_review'):continue
             previous=known.get(entry['id'])
-            if previous:continue
+            if previous:
+                state=previous.get('relic_state',{})
+                if (previous.get('exclusion_reason')!='lost' or not state.get('lost_recent_page')
+                        or entry.get('page_fingerprint')==state.get('lost_recent_page')):
+                    continue
             row=deepcopy(entry);row.update(confirmed=True,confirmed_by='recent_acquisition_strip',run_id=self.run['id'])
+            from .relic_state import merge
+            row=merge(previous,row,entry.get('page_fingerprint'))
+            if row is None:
+                continue
             row['observations']=[{'source':result.get('source'),'captured_at':result.get('captured_at'),'method':'recent_icon','match_score':entry['match_score']}]
-            bucket['items'].append(row);known[row['id']]=row;changed+=1
+            if previous:
+                previous.update(row)
+            else:
+                bucket['items'].append(row)
+            known[row['id']]=row;changed+=1
+        if result.get('recent_relics'):
+            bucket['last_recent_fingerprint']=result['recent_relics'][0].get('page_fingerprint')
         if changed:bucket['complete']=False
         return changed
 
@@ -448,7 +605,8 @@ class Session:
             entry['confirmed_by']='live_owned_page'
             entry['fields']={k:v for k,v in entry.get('fields',{}).items()
                 if v.get('value') is not None and v.get('confidence',0) >=
-                (.78 if result.get('coverage') and v.get('source') == 'card_region_ocr' else .90)}
+                (.78 if result.get('coverage') and v.get('source') == 'card_region_ocr'
+                 else .80 if v.get('source')=='displayed_relic_counter' else .90)}
         bucket=self.inventories[result['inventory_kind']]
         if bucket.get('last_live_fingerprint')==result['page_fingerprint']:return False
         changed=self.merge_inventory(result,entries)

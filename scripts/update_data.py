@@ -59,7 +59,8 @@ def freshness(provider, interval_hours, now):
 
 @contextmanager
 def preserve_published(exploration_only=False):
-    names=['data/exploration/knowledge.sqlite3','data/exploration/manifest.json','data/exploration/map_index.json']
+    names=['data/exploration/knowledge.sqlite3','data/exploration/manifest.json','data/exploration/map_index.json',
+           'assets/relics/rules.json','assets/operators/manifest.json']
     if not exploration_only:names+=['data/reader.sqlite3','data/effects/catalog.json','reports/effect_coverage.json']
     (ROOT/'data').mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.update-',dir=ROOT/'data') as temporary:
@@ -82,12 +83,13 @@ def preserve_published(exploration_only=False):
 
 def execute(args,report,now):
     providers=['lubiao','prts','exploration'] if args.source=='all' else ['lubiao','prts'] if args.source=='both' else [args.source]
-    base_attempted=False;failed=False;exploration_updated=False
+    base_attempted=False;failed=False;exploration_updated=False;operators_updated=False
     for provider in providers:
         result=freshness(provider,args.minimum_age_hours,now)
         if not args.check_only and (args.force or result['due']):
             base_attempted|=provider!='exploration'
             exploration_updated|=provider=='exploration'
+            operators_updated|=provider=='prts'
             script='update_exploration.py' if provider=='exploration' else f'collect_{provider}.py'
             command=[sys.executable,str(ROOT/'scripts'/script)]
             if provider=='exploration' and (ROOT/'data/exploration/last_attempt.json').exists():command.append('--resume')
@@ -117,8 +119,16 @@ def execute(args,report,now):
                 report[key]=run.returncode==0;failed|=run.returncode!=0
                 if failed:break
     if not failed and exploration_updated:
-        run=subprocess.run([sys.executable,str(ROOT/'scripts/collect_relic_assets.py')],cwd=ROOT,check=False)
-        report['relic_assets_exit_code']=run.returncode;failed|=run.returncode!=0
+        for name,key in [('collect_relic_assets.py','relic_assets_exit_code'),
+                         ('collect_relic_rules.py','relic_rules_exit_code')]:
+            run=subprocess.run([sys.executable,str(ROOT/'scripts'/name)],cwd=ROOT,check=False)
+            report[key]=run.returncode
+            failed|=run.returncode!=0
+            if failed:break
+    if not failed and operators_updated:
+        run=subprocess.run([sys.executable,str(ROOT/'scripts/collect_operator_avatars.py')],cwd=ROOT,check=False)
+        report['operator_assets_exit_code']=run.returncode
+        failed|=run.returncode!=0
     if not failed and not args.check_only and any('collector_exit_code' in row for row in report['sources']):
         run=subprocess.run([sys.executable,str(ROOT/'scripts/analyze_generation.py')],cwd=ROOT,check=False)
         report['generation_report_exit_code']=run.returncode;failed|=run.returncode!=0

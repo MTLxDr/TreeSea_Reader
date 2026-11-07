@@ -6,6 +6,57 @@ import cv2
 import numpy as np
 
 
+def relic_titles(image):
+    """Locate coloured title text independently of columns and scroll position."""
+    h, w = image.shape[:2]
+    b, g, r = [c.astype(np.int16) for c in cv2.split(image)]
+    mask = ((g > 92) & (g-r > 26) & (g-b > 9)).astype(np.uint8)
+    mask[:round(h*.025)] = 0
+    mask[round(h*.87):] = 0
+    mask[:, :round(w*.08)] = 0
+    rows = np.flatnonzero(mask.sum(axis=1) > w*.009)
+    bands = np.split(rows, np.where(np.diff(rows) > max(3, h*.005))[0]+1)
+    boxes = []
+    for band in bands:
+        if not len(band) or not h*.009 <= band[-1]-band[0] <= h*.037:
+            continue
+        strip = mask[band[0]:band[-1]+1]
+        xs = np.flatnonzero(strip.sum(axis=0) > 1)
+        groups = np.split(xs, np.where(np.diff(xs) > max(8,.48*(band[-1]-band[0])))[0]+1)
+        for group in groups:
+            if len(group) < w*.025 or group[-1]-group[0] > w*.24:
+                continue
+            boxes.append((max(0,(group[0]-5)/w), max(0,(band[0]-5)/h),
+                          min(1,(group[-1]+6)/w), min(1,(band[-1]+6)/h)))
+    aligned=[box[1] for box in boxes if any(abs(box[1]-other[1])<.015 and abs(box[0]-other[0])>.12 for other in boxes)]
+    if aligned:
+        first=min(aligned)
+        boxes=[box for box in boxes if not (box[1]<.20 and box[1]<first-.04)]
+    return sorted(boxes, key=lambda box: (round(box[1]*h/18), box[0]))
+
+
+def operator_cards(image):
+    """Detect the dark roster cards against the light roster background."""
+    h, w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    mask = (gray < 120).astype(np.uint8)*255
+    mask[:, :round(w*.28)] = 0
+    mask[:round(h*.07)] = 0
+    mask[round(h*.88):] = 0
+    kernel = np.ones((max(3,round(h*.012)),max(5,round(w*.012))),np.uint8)
+    mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,kernel)
+    contours, _ = cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    boxes = []
+    for contour in contours:
+        x,y,cw,ch = cv2.boundingRect(contour)
+        if not (w*.13 < cw < w*.48 and h*.08 < ch < h*.24 and 2 < cw/ch < 5.5):
+            continue
+        if cv2.contourArea(contour)/(cw*ch) < .58:
+            continue
+        boxes.append((x/w,y/h,(x+cw)/w,(y+ch)/h))
+    return sorted(boxes,key=lambda box:(round(box[1]*h/30),box[0]))
+
+
 def crop(image, box):
     h, w = image.shape[:2]
     x0, y0, x1, y1 = box
@@ -18,12 +69,14 @@ def layout_kind(image, tokens):
     h, w = image.shape[:2]
     if h < 300 or w < 500:
         return None
+    if len(relic_titles(image))>=3 and float(np.median(image))<120:
+        return "relics"
     text = [(normalized(t["text"]), center(t)[0]/w, center(t)[1]/h) for t in tokens]
     close = [x for name, x, y in text if name == "收起" and y > .90]
     if any(name.startswith("零件箱容量") and x < .25 and .37 < y < .67
            for name, x, y in text):
         return "parts"
-    if any(.64 < x < .85 for x in close):
+    if operator_cards(image):
         roster = crop(image, (.30, .02, .88, .11))
         if np.median(roster) > 145:
             return "operators"
@@ -38,37 +91,14 @@ def boxes_for(image, kind, tokens):
 
     h, w = image.shape[:2]
     if kind == "relics":
-        left_rows = []
-        for x in (.137, .442, .746):
-            area = crop(image, (x-.015, .018, x+.20, .87))
-            b, g, r = [c.astype(np.int16) for c in cv2.split(area)]
-            mask = ((g > 92) & (g-r > 26) & (g-b > 9))
-            rows = np.flatnonzero(mask.sum(axis=1) > w*.007)
-            groups = np.split(rows, np.where(np.diff(rows) > h*.006)[0]+1)
-            for band in groups:
-                if len(band) < max(3, h*.007):
-                    continue
-                y0, y1 = .018+band[0]/h, .018+band[-1]/h
-                if not .010 < y1-y0 < .037:
-                    continue
-                segment = mask[band[0]:band[-1]+1]
-                columns = np.flatnonzero(segment.sum(axis=0) > 1)
-                if len(columns) < w*.026 or columns[0] > w*.035:
-                    continue
-                if x == .137:
-                    left_rows.append(y0)
-                elif left_rows and all(abs(y0-y) > .025 for y in left_rows):
-                    continue
-                yield (x-.018+columns[0]/w, y0-.005, x-.012+columns[-1]/w, y1+.006), {}
+        for box in relic_titles(image):
+            yield box, {}
     elif kind == "operators":
-        for x in (.352, .620):
-            for bottom in (.274, .464, .654, .844):
-                # The lower name plate is dark, even if the portrait is highlighted.
-                plate = crop(image, (x+.10, bottom-.032, x+.171, bottom-.008))
-                if (cv2.cvtColor(plate, cv2.COLOR_BGR2GRAY) < 115).mean() < .55:
-                    continue
-                yield (x+.096, bottom-.035, x+.195, bottom+.003), {
-                    "level": (x-.013, bottom-.039, x+.013, bottom-.009)}
+        for x0,y0,x1,y1 in operator_cards(image):
+            cw,ch=x1-x0,y1-y0
+            yield (x0+cw*.56,y1-ch*.29,x1-cw*.015,y1-ch*.025), {
+                "level": (x0+cw*.115,y1-ch*.24,x0+cw*.175,y1-ch*.065),
+                "card": (x0,y0,x1,y1)}
     elif kind == "parts":
         # Use the layout's fixed top and row pitch. Horizontal scrolling can
         # shift the columns, so anchor the name boxes on visible OCR labels.

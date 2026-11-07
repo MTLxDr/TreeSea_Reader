@@ -84,7 +84,7 @@ class RecentRelicRecognizer:
             match=self.match_patch(patch)
             if match is None:continue
             item,asset,ranked,score,margin,accepted=match
-            entry=dict(deepcopy(item),kind='relics',fields={'quantity':{'value':None,'source':'recent_icon','confidence':0.,'manual':False}},
+            entry=dict(deepcopy(item),kind='relics',fields={'stacks':{'value':None,'source':'recent_icon','confidence':0.,'manual':False}},
                 raw='近期获得图标',match_score=round(score,4),match_margin=round(margin,4),confidence=round(score,4),
                 needs_review=not accepted,icon_source=asset['source_url'],page_fingerprint=fingerprint,
                 box=[[round(x0+left/scale),round(y0+top/scale)],[round(x0+(left+patch.shape[1])/scale),round(y0+top/scale)],

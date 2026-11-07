@@ -8,6 +8,7 @@ import hashlib
 import re
 import time
 import unicodedata
+from copy import deepcopy
 
 import cv2
 import numpy as np
@@ -106,6 +107,62 @@ class InventoryRecognizer:
     def __init__(self, catalog, ocr, relic_icons=None):
         self.catalog, self.ocr = catalog, ocr
         self.relic_icons = relic_icons
+        from .operator_vision import OperatorVision
+        self.operator_vision=OperatorVision()
+        self.name_index = {}
+        self.choice_cache = {}
+        for kind, items in catalog.inventory.items():
+            index = {}
+            for item in items:
+                for name in [item['name']] + item.get('aliases', []):
+                    rows=index.setdefault(normalized(name), [])
+                    if not any(row['id']==item['id'] for row in rows):
+                        rows.append(item)
+            self.name_index[kind] = index
+
+    def choices(self, text, kind):
+        value = normalized(text)
+        key = kind, value
+        if key not in self.choice_cache:
+            exact = self.name_index[kind].get(value)
+            self.choice_cache[key] = ([(1., item) for item in exact] if exact
+                                      else name_candidates(text, self.catalog.inventory[kind]))
+            if len(self.choice_cache)>4096:
+                self.choice_cache.pop(next(iter(self.choice_cache)))
+        return self.choice_cache[key]
+
+    def relic_fields(self, image, box, item, tokens):
+        from .relic_state import rule_for
+        from .inventory_layout import crop
+
+        rule=rule_for(item['id'])
+        x,y,_,_=box
+        h,w=image.shape[:2]
+        fields={}
+        if rule.get('counter'):
+            area=(max(0,x-.055),y+.055,min(1,x+.018),min(.90,y+.14))
+            found=[t for t in tokens if area[0]<=center(t)[0]/w<=area[2]
+                   and area[1]<=center(t)[1]/h<=area[3] and re.fullmatch(r'\d{1,4}',t['text'].strip())]
+            if not found:
+                patch=crop(image,area)
+                if patch.size:
+                    found=self.ocr.read(patch)
+                    found=[t for t in found if re.fullmatch(r'\d{1,4}',t['text'].strip())]
+            if len(found)==1 and found[0]['score']>=.80:
+                value=int(found[0]['text'])
+                if rule.get('maximum') is None or value<=rule['maximum']:
+                    fields['stacks']=field(value,found[0])
+                    fields['stacks']['source']='displayed_relic_counter'
+        if rule.get('one_use'):
+            used=[t for t in tokens if '已使用' in t['text']
+                  and x-.10<=center(t)[0]/w<=x+.03 and y-.02<=center(t)[1]/h<=y+.15]
+            if not used and not tokens:
+                patch=crop(image,(max(0,x-.10),max(0,y-.02),min(1,x+.03),min(.90,y+.15)))
+                if patch.size:
+                    used=[t for t in self.ocr.read(patch) if '已使用' in t['text']]
+            if used:
+                fields['used']=field(True,max(used,key=lambda t:t['score']))
+        return fields
 
     def relic_card_icon(self, image, box):
         if self.relic_icons is None:
@@ -156,9 +213,9 @@ class InventoryRecognizer:
                 x0, y0, x1, y1 = box
                 inside = [t for t in tokens if x0-.006 <= center(t)[0]/width <= x1+.006
                           and y0-.004 <= center(t)[1]/height <= y1+.004
-                          and name_candidates(t["text"], catalog)]
-                strong = any(t["score"] >= .90 and name_candidates(t["text"], catalog)[0][0] == 1 for t in inside)
-                local = line_token(self.ocr, image, box) if kind != "parts" or not strong else None
+                          and self.choices(t["text"], kind)]
+                strong = any(t["score"] >= .90 and self.choices(t["text"], kind)[0][0] == 1 for t in inside)
+                local = line_token(self.ocr, image, box) if not strong else None
                 if kind == "operators" and inside and not strong:
                     anchor = max(inside, key=lambda t: t["score"])
                     a, b, c, d = rect(anchor)
@@ -167,7 +224,20 @@ class InventoryRecognizer:
                     if focused and normalized(focused["text"]) == normalized(anchor["text"]):
                         local = focused
                 options = inside + ([local] if local else [])
-                exact = [t for t in options if any(s == 1 for s, _ in name_candidates(t["text"], catalog))]
+                exact = [t for t in options if any(s == 1 for s, _ in self.choices(t["text"], kind))]
+                if kind=='operators' and not exact and 'card' in details:
+                    from .inventory_layout import crop
+                    cx,cy,cx1,cy1=details['card']
+                    portrait=crop(image,(cx,cy,cx+(cx1-cx)*.55,cy1))
+                    hit=self.operator_vision.match(portrait)
+                    if hit:
+                        identity=hit['operator_id']
+                        item=next((r for r in catalog if r['id']==identity),None)
+                        if item:
+                            token=dict(text=item['name'],score=.90,skin_evidence=hit,
+                                       box=[[x0*width,y0*height],[x1*width,y0*height],[x1*width,y1*height],[x0*width,y1*height]])
+                            options.append(token)
+                            exact.append(token)
                 if kind == "relics" and not any(t["score"] >= .90 for t in exact):
                     icon = self.relic_card_icon(image, box)
                     if icon:
@@ -185,7 +255,7 @@ class InventoryRecognizer:
         for token, details, card in candidates:
             if token["score"] < .68:
                 continue
-            choices = name_candidates(token["text"], catalog)
+            choices = self.choices(token["text"], kind)
             if not choices:
                 if card is not None:
                     unresolved.append(card)
@@ -203,14 +273,18 @@ class InventoryRecognizer:
             item, token = observed["item"], observed["token"]
             values = (detail_fields(self.ocr, image, observed["details"], tokens) if layout == kind
                       else nearby_fields(index, observations, tokens, width, height, kind))
+            if kind=='relics' and observed['card'] is not None:
+                values.update(self.relic_fields(image,observed['card'],item,tokens))
             entries.append({"id": item["id"], "name": item["name"], "kind": kind,
                 "confidence": token["score"] * observed["similarity"], "raw": token["text"],
                 "corroborated": bool(token.get("corroborated")),
                 "icon_source": token.get("icon_source"),
+                "skin_evidence": token.get("skin_evidence"),
                 "box": token["box"], "candidates": observed["candidates"],
                 "needs_review": observed["ambiguous"] or (layout != kind and repeated[item["id"]] > 1),
                 "document_id": item["document_id"], "source_url": item["source_url"],
                 "fields": values})
+            entries[-1]['display_order']=index
         page_fields = {}
         if layout == "parts":
             total = detail_fields(self.ocr, image, {"valuation": (.132, .735, .197, .792)}).get("valuation")
@@ -225,10 +299,13 @@ class InventoryRecognizer:
         if layout == kind:
             signature += repr(([(r["id"], {k: v["value"] for k, v in r["fields"].items()}) for r in entries],
                                {k: v["value"] for k, v in page_fields.items()}))
+        page_layout=repr((kind,[(r['id'],round(center(r)[0]/width*100),
+                               round(center(r)[1]/height*100)) for r in entries]))
         return {"schema_version": 2, "page_type": "inventory", "inventory_kind": kind,
             "captured_at": datetime.now(timezone.utc).isoformat(), "source": source,
             "image": {"width": width, "height": height}, "entries": entries, "ocr_tokens": tokens,
             "page_fingerprint": hashlib.sha256(signature.encode()).hexdigest(),
+            "page_layout_fingerprint": hashlib.sha256(page_layout.encode()).hexdigest(),
             "context_detected": detected, "ownership_risk": risk, "needs_review": True,
             "coverage": coverage, "page_fields": page_fields,
             "notices": ["翻页继续读取；可在表格中补录练度、数量或修正名称。"] +

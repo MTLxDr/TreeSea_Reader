@@ -14,12 +14,14 @@ from .operator_ui import OperatorDetailsDialog
 FIELDS = {"quantity": ("数量", 1, 999), "level": ("等级", 1, 90), "elite": ("精英阶段", 0, 2),
           "potential": ("潜能", 1, 6), "skill_level": ("技能等级", 1, 7), "mastery": ("专精", 0, 3)}
 FIELDS["skill_index"] = ("技能编号（用于专精）", 1, 3)
+FIELDS["stacks"] = ("叠层", 0, 9999)
+FIELDS["used"] = ("已使用", 0, 1)
 FIELDS.update(valuation=("当前估价",0,99999),uses=("可用次数",0,99))
 FIELDS.update(trust=("信赖",0,200),module_level=("模组等级",0,3),
               skill_1_mastery=("技能1专精",0,3),skill_2_mastery=("技能2专精",0,3),skill_3_mastery=("技能3专精",0,3))
-COLUMNS = {"relics": ["名称", "数量"], "parts": ["名称", "数量", "当前估价", "可用次数"],
+COLUMNS = {"relics": ["名称", "叠层"], "parts": ["名称", "数量", "当前估价", "可用次数"],
            "operators": ["名称", "等级", "精英阶段", "技能等级", "专精"]}
-KEYS = {"relics": ["quantity"], "parts": ["quantity", "valuation", "uses"],
+KEYS = {"relics": ["stacks"], "parts": ["quantity", "valuation", "uses"],
         "operators": ["level", "elite", "skill_level", "mastery"]}
 
 
@@ -80,6 +82,14 @@ class InventoryPanel(QWidget):
         self.status = QLabel()
         self.status.setObjectName("muted")
         head.addWidget(self.status)
+        self.order=QComboBox()
+        for title,key in [('游戏顺序','game'),('最近变化','recent'),('名称','name')]:
+            self.order.addItem(title,key)
+        self.order.currentIndexChanged.connect(self.refresh)
+        head.addWidget(self.order)
+        self.show_lost=QCheckBox('显示已失去藏品')
+        self.show_lost.toggled.connect(self.refresh)
+        head.addWidget(self.show_lost)
         head.addStretch()
         layout.addLayout(head)
 
@@ -175,9 +185,21 @@ class InventoryPanel(QWidget):
         remove.clicked.connect(lambda: self.remove(self.kind))
         row.addWidget(remove)
         inner.addLayout(row)
+        self.relic_actions=QWidget()
+        self.relic_action_buttons={}
+        actions=QHBoxLayout(self.relic_actions)
+        actions.setContentsMargins(0,0,0,0)
+        for title,method in [('交换 / 失去',self.lose_relic),('重新获得',self.reacquire_relic),('记录已生效',self.trigger_relic)]:
+            button=QPushButton(title)
+            button.clicked.connect(method)
+            actions.addWidget(button)
+            self.relic_action_buttons[title]=button
+        inner.addWidget(self.relic_actions)
         self.completes = {}
         for kind in KINDS:
             check = QCheckBox("已扫描全部页面")
+            if kind=='relics':
+                check.setToolTip('重新读取一轮全部页面后勾选，本轮未出现的旧藏品将标记为失去。漏读条目请先补录。')
             check.toggled.connect(lambda checked, k=kind: self.mark_complete(k, checked))
             check.hide()
             self.completes[kind] = check
@@ -189,6 +211,9 @@ class InventoryPanel(QWidget):
     # -- 状态 ------------------------------------------------------------
     def show_kind(self, kind):
         self.kind = kind
+        self.order.setVisible(kind=='relics')
+        self.show_lost.setVisible(kind=='relics')
+        self.relic_actions.setVisible(kind=='relics')
         for key, button in self.kind_buttons.items():
             button.blockSignals(True)
             button.setChecked(key == kind)
@@ -225,6 +250,8 @@ class InventoryPanel(QWidget):
         self.refresh();self.changed.emit()
 
     def _refresh_selected(self):
+        for button in self.relic_action_buttons.values():
+            button.setEnabled(False)
         if self.kind=='events':
             self.selected_name.setText('已遇事件')
             self.selected_hint.setText('候选按当前楼层优先排列；可重复事件可以多次记录。')
@@ -253,6 +280,18 @@ class InventoryPanel(QWidget):
                     lines.append(f"本页第 {index} 张：{details or '字段待读取'}")
                 fields = "\n".join(lines)
         self.selected_hint.setText(fields or "字段未知，可补录。")
+        if self.kind=='relics':
+            from .relic_state import rule_for
+            rule=rule_for(identity)
+            state=row.get('relic_state',{})
+            self.relic_action_buttons['交换 / 失去'].setEnabled(not row.get('excluded'))
+            self.relic_action_buttons['重新获得'].setEnabled(bool(row.get('excluded')))
+            self.relic_action_buttons['记录已生效'].setEnabled(
+                rule['mode']=='one_use' and not row.get('excluded')
+                and state.get('generation',1) not in state.get('triggered_generations',[]))
+            mode={'continuous':'持续持有效果','counter':'游戏计数','one_use':'一次性生效','on_acquire':'获得时生效','unknown':'效果类型待核对'}[rule['mode']]
+            self.selected_hint.setText(self.selected_hint.text()+f"\n{mode} · {'当前持有' if not row.get('excluded') else '已失去'}")
+            self.selected_hint.setToolTip(rule.get('source_excerpt',''))
 
     # -- 扫描结果 --------------------------------------------------------
     def set_scan(self, result, follow=True):
@@ -289,7 +328,8 @@ class InventoryPanel(QWidget):
                 combo.addItem(item["name"], item["id"])
             top.addWidget(combo, 1)
             line.addLayout(top)
-            fields = " · ".join(f"{FIELDS[k][0]} {v['value']}" for k, v in row["fields"].items()) or "字段未知"
+            fields = " · ".join(f"{FIELDS[k][0]} {v['value']}" for k, v in row["fields"].items()
+                                if k in FIELDS and v.get('value') is not None) or "字段待读取"
             detail = QLabel(f"{fields}\n{row['raw']} · {row['confidence']:.0%}")
             detail.setWordWrap(True)
             detail.setObjectName("muted")
@@ -331,7 +371,11 @@ class InventoryPanel(QWidget):
         self.event_panel.refresh()
         for kind, table in self.tables.items():
             bucket = self.session.inventories[kind]
-            rows = [r for r in bucket["items"] if not r.get("excluded")]
+            rows = [r for r in bucket["items"] if not r.get("excluded") or (kind=='relics' and self.show_lost.isChecked())]
+            if kind=='relics':
+                mode=self.order.currentData()
+                key=(lambda r:r['name']) if mode=='name' else (lambda r:r.get('last_seen','')) if mode=='recent' else (lambda r:(r.get('page_order',0),r.get('display_order',9999)))
+                rows.sort(key=key,reverse=mode=='recent')
             table.blockSignals(True)
             table.setRowCount(len(rows))
             keys = KEYS[kind]
@@ -367,6 +411,17 @@ class InventoryPanel(QWidget):
             value = None if cell.text().strip() in {"", "—"} else int(cell.text())
             if value is not None and not FIELDS[key][1] <= value <= FIELDS[key][2]:
                 raise ValueError
+            if kind=='relics' and key=='stacks' and value is not None:
+                from .relic_state import rule_for
+                rule=rule_for(identity)
+                if rule['mode']=='continuous' and value!=1:
+                    self.help.setText('持续持有藏品记为 1 层。交换或失去请使用对应按钮。')
+                    self.refresh()
+                    return
+                if rule.get('maximum') is not None and value>rule['maximum']:
+                    self.help.setText(f"来源记录的层数上限为 {rule['maximum']}。")
+                    self.refresh()
+                    return
         except ValueError:
             self.help.setText(f"{FIELDS[key][0]}须为{FIELDS[key][1]}至{FIELDS[key][2]}，留空可标为未知。")
             self.refresh()
@@ -390,7 +445,7 @@ class InventoryPanel(QWidget):
             names.setCurrentIndex(names.findData(chosen))
         form.addRow("名称（可搜索）", names)
         spins = {}
-        keys = [key for key in FIELDS if key not in {"quantity", "valuation", "uses"}] if kind == "operators" else KEYS[kind]
+        keys = [key for key in FIELDS if key not in {"quantity", "valuation", "uses", "stacks", "used"}] if kind == "operators" else KEYS[kind]
         for key in keys:
             label, lo, hi = FIELDS[key]
             spin = QSpinBox()
@@ -403,6 +458,11 @@ class InventoryPanel(QWidget):
         if kind=="operators":
             module=QComboBox();form.addRow("装备模组",module)
         def load_fields():
+            if kind=='relics' and 'stacks' in spins:
+                from .relic_state import rule_for
+                rule=rule_for(names.currentData())
+                maximum=1 if rule['mode']=='continuous' else rule.get('maximum') or FIELDS['stacks'][2]
+                spins['stacks'].setMaximum(maximum)
             row = next((r for r in self.session.inventories[kind]["items"] if r["id"] == names.currentData()), {})
             for key, spin in spins.items():
                 value = row.get("fields", {}).get(key, {}).get("value")
@@ -439,6 +499,24 @@ class InventoryPanel(QWidget):
         if identity:
             item = next(i for i in self.catalog.inventory[kind] if i["id"] == identity)
             self.session.manual_inventory(kind, item, excluded=True)
+            self.refresh()
+            self.changed.emit()
+
+    def lose_relic(self):
+        identity=self.selected('relics')
+        if identity and self.session.lose_relic(identity):
+            self.refresh()
+            self.changed.emit()
+
+    def reacquire_relic(self):
+        identity=self.selected('relics')
+        if identity and self.session.reacquire_relic(identity):
+            self.refresh()
+            self.changed.emit()
+
+    def trigger_relic(self):
+        identity=self.selected('relics')
+        if identity and self.session.record_relic_trigger(identity):
             self.refresh()
             self.changed.emit()
 

@@ -11,12 +11,12 @@
 如需校验下载文件，在 PowerShell 中运行以下命令，将结果与同一 Release 的 `.sha256` 文件比较。
 
 ```powershell
-Get-FileHash .\TreeSeaReader-ver1.0-launchers-20261103-win64.zip -Algorithm SHA256
+Get-FileHash .\TreeSeaReader-ver1.1-win64.zip -Algorithm SHA256
 ```
 
 ## 功能
 
-- **探索记录** · 识别地图、资源、藏品、零件和干员，跟踪进入节点和已遇事件，支持手动校正。[识别更新说明](docs/recognition_upgrade_20261103.md)
+- **探索记录** · 识别地图、藏品叠层、零件和换肤干员，标记流窜居民，显示行动路线并支持手绘标注。[识别与标注说明](docs/vision_update_20261107.md)
 - **探索查询** · 查看节点概率、事件池、剩余藏品池和关卡路线。
 - **数值计算** · 查询效果资料，查看伤害计算的中间值。根据本局清单估算单次伤害和技能期间平均每秒伤害（DPS）。
 - **命令行与本地接口** · 使用 `TreeSeaReaderCLI.exe` 调用计算、识别和更新功能。详见 [启动与封装](docs/packaging.md)和[计算接口](docs/calculation_api.md)。

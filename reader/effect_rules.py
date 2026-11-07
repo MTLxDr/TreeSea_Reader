@@ -237,3 +237,47 @@ def apply_rules(request, compiled, side, subject, audit, included=()):
                 audit['missing'].append({'code': 'missing_base_stat', 'detail': side + '.' + r['stat'], 'rule_id': r['rule_id']})
                 r['applied'] = False; r['reason'] = '没有对应基础属性'; continue
             request[side][r['stat']].setdefault(r['stage'], []).append(operand)
+
+
+def compile_counted_entry(entry, stacks):
+    """Expand explicit per-layer attribute runes using the observed game counter."""
+    compiled=compile_entry(entry)
+    runes=entry.get('source_parameters',{}).get('topicBuffs',[])
+    consumed=set()
+    emitted=[]
+    for index,rune in enumerate(runes):
+        key=rune.get('key','')
+        stage={'layer_char_attribute_mul':'relic_mul_delta',
+               'layer_char_attribute_add':'relic_add'}.get(key)
+        if stage is None:
+            continue
+        board=rune.get('blackboard',[])
+        if any(b['key'] not in set(BB_STATS)|{'selector.profession','selector.buildable'} for b in board):
+            continue
+        conditions=[]
+        valid=True
+        for b in board:
+            if b['key'].startswith('selector.'):
+                values=str(b.get('valueStr','')).upper().split('|')
+                allowed=set(PROFESSIONS.values()) if b['key'].endswith('profession') else {'MELEE','RANGED','ALL'}
+                if not set(values)<=allowed:
+                    valid=False
+                conditions.append(dict(field='profession' if b['key'].endswith('profession') else 'position',
+                                       op='in',values=values))
+        if not valid:
+            continue
+        for b in board:
+            if b['key'] in BB_STATS:
+                value=number(b['value'],'source per-layer value')*stacks
+                item=rule(entry,f'observed-layer:{index}',BB_STATS[b['key']],stage,value,
+                          conditions,dict(kind='source_layer_rune',rune=rune,observed_stacks=stacks))
+                item['source']['detail']=f"画面/确认层数 {stacks} × 每层 {b['value']}"
+                emitted.append(item)
+        consumed.add(key)
+    if emitted:
+        consumed.update({'layer_after_battle_data','layer_zone_end_battle','layer_scrap_owned'})
+        compiled['unsupported']=[g for g in compiled['unsupported']
+                                 if not (g['code']=='unsupported_rune' and g['detail'] in consumed)]
+        compiled['rules'].extend(emitted)
+        compiled['status']='partial' if compiled['unsupported'] else 'compiled'
+    return compiled

@@ -85,7 +85,7 @@ def compile_session(envelope, catalog=None):
                                for stat in ('def', 'res', 'element_res', 'ep_resistance')}
         audit['notes'].append('固定单目标0防0抗，无敌人、关卡、护盾与免疫机制；未选择的难度及分队增益不计入。')
     def missing(code, detail): audit['missing'].append({'code': code, 'detail': detail})
-    def use(entry, side='attacker', subject=None, included=()):
+    def use(entry, side='attacker', subject=None, included=(), stacks=None):
         audit['sources'].append({'effect_id': entry['id'], 'name': entry['name'], 'variant': entry['variant'],
                                  'subject_id': entry['subject_id'], 'source': entry['source']})
         if entry['category'] == '干员潜能' and re.fullmatch(r'(?:部署费用[+-]\d+|再部署时间[+-]\d+(?:秒|s)?)', entry['raw_effect'].strip()):
@@ -94,6 +94,9 @@ def compile_session(envelope, catalog=None):
         if target_mode == 'zero' and entry['category'] in {'干员技能', '干员天赋'}:
             from .skill_timing import compile_zero_target_effect
             compiled = compile_zero_target_effect(entry)
+        elif stacks is not None:
+            from .effect_rules import compile_counted_entry
+            compiled=compile_counted_entry(entry,stacks)
         else:
             compiled = compile_entry(entry)
         audit['excluded'].extend({'effect_id': entry['id'], **row} for row in compiled.get('excluded_clauses', []))
@@ -116,11 +119,15 @@ def compile_session(envelope, catalog=None):
         for item in bucket.get('items', []):
             if not isinstance(item, dict) or not isinstance(item.get('id'), str): raise CalculationError('Invalid inventory item')
             if not isinstance(item.get('fields', {}), dict): raise CalculationError('Invalid inventory fields')
+            if 'relic_state' in item and not isinstance(item['relic_state'],dict):
+                raise CalculationError('Invalid relic state')
             for key in ('confirmed', 'excluded'):
                 if key in item and not isinstance(item[key], bool): raise CalculationError(key + ' must be boolean')
             if any(not isinstance(v, dict) for v in item.get('fields', {}).values()):
                 raise CalculationError('Inventory fields must use {value:...} records')
             if item.get('excluded') is True:
+                if kind=='relics' and (item.get('relic_state') or {}).get('trigger_count'):
+                    missing('retained_one_use_effect',item['id']+' 已触发的效果需核对持续时间与作用对象')
                 audit['excluded'].append({'kind': kind, 'id': item['id'], 'reason': '人工移除'}); continue
             if item.get('confirmed') is not True:
                 missing('unconfirmed_item', kind + ':' + item['id']); continue
@@ -300,18 +307,34 @@ def compile_session(envelope, catalog=None):
         selected_subjects = set()
         if bucket.get('complete') is not True: missing('incomplete_inventory', kind + ' 未确认已录完整')
         for item in items:
-            quantity = field(item, 'quantity')
-            if quantity is None:
-                missing('missing_quantity', item['id']); continue
-            integer(quantity, 'quantity', 1, 999)
-            if quantity != 1:
-                missing('unsupported_item_stacking', item['id'] + ' 数量大于1，尚无重复持有效果依据'); continue
+            stacks=None
+            if kind=='relics' and ('relic_state' in item or field(item,'stacks') is not None):
+                from .relic_state import rule_for
+                metadata=rule_for(item['id'])
+                if metadata['mode']=='counter':
+                    stacks=field(item,'stacks')
+                    if stacks is None:
+                        missing('missing_relic_counter',item['id']);continue
+                    integer(stacks,'stacks',0,metadata.get('maximum') or 9999)
+                elif metadata['mode'] in {'one_use','on_acquire'}:
+                    missing('one_use_effect_target',item['id']+' 按独立生效记录核对，不能乘以累计次数');continue
+                elif metadata['mode']=='unknown':
+                    missing('unknown_relic_counter_mode',item['id']);continue
+                elif field(item,'stacks') is not None:
+                    integer(field(item,'stacks'),'continuous relic stacks',1,1)
+            else:
+                quantity = field(item, 'quantity')
+                if quantity is None:
+                    missing('missing_quantity', item['id']); continue
+                integer(quantity, 'quantity', 1, 999)
+                if quantity != 1:
+                    missing('unsupported_item_stacking', item['id'] + ' 数量大于1，尚无重复持有效果依据'); continue
             try: entry = catalog.select(item['id'], categories)
             except CalculationError as error: missing('unresolved_owned_effect', str(error)); continue
             if entry['subject_id'] in selected_subjects:
                 raise CalculationError('Duplicate game effect through multiple source IDs: ' + entry['subject_id'])
             selected_subjects.add(entry['subject_id'])
-            use(entry, subject=subject)
+            use(entry, subject=subject, stacks=stacks)
 
     difficulty = selection.get('difficulty')
     if difficulty is None: missing('missing_difficulty', '难度未知')

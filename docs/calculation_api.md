@@ -111,3 +111,8 @@ Invoke-RestMethod -Uri http://127.0.0.1:8765/v1/calculate -Method Post -ContentT
 供其他Agent执行的Prompt见 `agent_calculation_handoff_prompt.md`。CLI/HTTP均支持上述三个操作；本机窗口提供命名乘区表格、损伤累积页及请求/结果导出。
 
 另支持本局操作 `session_damage`，使用相同CLI与 `POST /v1/calculate`。通用客户端为 `reader/calculation_client.py` 与 `scripts/calculation_client.py`，可选择Python/CLI/HTTP。`GET /v1/effects/{id}` 增加 `active_revision` 与活动来源的 `compilation`；原 `execution_status` 是入库时状态，当前执行能力以编译结果为准。`context` 不改变确认状态或编译选择。
+## 藏品叠层状态
+
+本局清单的 relics 条目可使用 fields.stacks.value 保存游戏显示的计数。Reader 另在 relic_state 中保存持有记录与一次性触发记录。旧版 fields.quantity 保持兼容。旧数量与新层数之间需要具名来源。
+
+持续效果按当前持有生效一次。已明确的逐层属性符文按来源参数乘以确认层数。一次性效果需要对应的受益干员、持续条件等信息，累计触发次数保留用于追踪，未直接作为全部属性的倍数。具体缺项列入返回值的 audit，完整结果继续遵守 allow_partial 约定。
